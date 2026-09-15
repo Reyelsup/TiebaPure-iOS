@@ -1,0 +1,47 @@
+name: Build Unsigned IPA
+
+# Produces a downloadable .ipa for sideloading. The main ci.yml only builds
+# and tests; it never exports an installable artifact.
+#
+# The archive is unsigned, so it will NOT install on a stock, non-jailbroken
+# iPhone as-is. Re-sign it first with AltStore/SideStore, a free or paid
+# developer certificate, or a sideload tool.
+# Manual only. ci.yml already packages an IPA on every push, but it runs the
+# full test suite first; trigger this instead when a visual tweak needs a
+# fresh build and the tests would just be waiting time.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      # scripts/package-unsigned-ipa.sh normally re-runs xcodegen to prove the
+      # committed TiebaPure.xcodeproj still matches project.yml. xcodegen isn't
+      # preinstalled on the runner, and the committed project is already valid,
+      # so skip that gate rather than pulling in a Homebrew install.
+      - name: Package unsigned IPA
+        env:
+          TIEBAPURE_SKIP_XCODEGEN_CHECK: "1"
+        run: bash scripts/package-unsigned-ipa.sh
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiebaPure-unsigned-ipa
+          path: build/TiebaPure-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error

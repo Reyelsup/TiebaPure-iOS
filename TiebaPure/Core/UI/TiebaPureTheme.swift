@@ -53,6 +53,24 @@ extension View {
         frame(minWidth: 44, minHeight: 44)
     }
 
+    /// Softens the scroll-edge transition on iOS 26+.
+    ///
+    /// `ScrollEdgeEffectStyle.soft` gives "a subtle, blurred boundary between
+    /// pinned controls and scrolling content", where `.hard` gives a linear,
+    /// nearly opaque one. The feed reads better with the soft transition.
+    ///
+    /// The modifier takes an explicit `Edge.Set` with no default, so
+    /// `.vertical` is supplied here; scoping it keeps horizontal surfaces
+    /// (media grids) on the system default.
+    @ViewBuilder
+    func tiebaSoftScrollEdge(for edges: Edge.Set = .vertical) -> some View {
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectStyle(.soft, for: edges)
+        } else {
+            self
+        }
+    }
+
 }
 
 enum PaginationPrefetchPolicy {

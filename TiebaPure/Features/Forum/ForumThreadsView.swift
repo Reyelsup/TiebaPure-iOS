@@ -62,7 +62,13 @@ struct ForumThreadsView: View {
         self.openUserInParent = openUserInParent
         let storedCategory = sortPreferenceStore.selection(for: forum)
         _selectedCategory = State(initialValue: storedCategory)
-        _latestSortCategory = State(initialValue: storedCategory)
+        // The "最新" menu always reflects a latest-style sort, even when the
+        // persisted category is `hot` or `featured`. That keeps the dropdown
+        // arrow's value sensible when the user comes back to the latest tab.
+        let resolvedLatest: ForumThreadCategory = storedCategory.belongsToLatestTab
+            ? storedCategory
+            : .replyTime
+        _latestSortCategory = State(initialValue: resolvedLatest)
     }
 
     var body: some View {
@@ -288,6 +294,9 @@ struct ForumThreadsView: View {
 
     private var categoryPicker: some View {
         HStack(spacing: TiebaPureTheme.Spacing.xs) {
+            // "最新" continues to host the reply/publish-time sub-menu so
+            // long-time users keep the dropdown they expect. "热门" and
+            // "精华" are top-level tabs that commit directly.
             Menu {
                 ForEach(ForumThreadCategory.latestSortOptions) { category in
                     Button {
@@ -310,7 +319,7 @@ struct ForumThreadsView: View {
                 }
             } label: {
                 categoryTabLabel(
-                    title: "最新",
+                    title: ForumThreadCategory.replyTime.topLevelTitle,
                     systemImage: "chevron.down",
                     isSelected: selectedCategory.belongsToLatestTab
                 )
@@ -323,10 +332,26 @@ struct ForumThreadsView: View {
             .accessibilityIdentifier("forum-category-latest-menu")
 
             Button {
+                sortPreferenceStore.select(.hot, for: forum)
+                selectedCategory = .hot
+            } label: {
+                categoryTabLabel(
+                    title: ForumThreadCategory.hot.topLevelTitle,
+                    isSelected: selectedCategory == .hot
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("热门")
+            .accessibilityHint(ForumThreadCategory.hot.accessibilityHint)
+            .accessibilityAddTraits(selectedCategory == .hot ? .isSelected : [])
+            .accessibilityIdentifier(ForumThreadCategory.hot.accessibilityIdentifier)
+
+            Button {
+                sortPreferenceStore.select(.featured, for: forum)
                 selectedCategory = .featured
             } label: {
                 categoryTabLabel(
-                    title: "精华",
+                    title: ForumThreadCategory.featured.topLevelTitle,
                     isSelected: selectedCategory == .featured
                 )
             }
@@ -400,6 +425,7 @@ struct ForumThreadsView: View {
                 .contentShape(Rectangle())
             }
             .accessibilityIdentifier("forum-threads-scroll-view")
+            .tiebaSoftScrollEdge()
             .shortPullRefresh(
                 isEnabled: didLoad && isLoading == false,
                 surface: .grouped,

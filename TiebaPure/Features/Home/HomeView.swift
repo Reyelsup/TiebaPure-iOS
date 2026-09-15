@@ -541,6 +541,7 @@ struct HomeView: View {
             .contentShape(Rectangle())
         }
         .scrollBounceBehavior(.always, axes: .vertical)
+        .tiebaSoftScrollEdge()
         .accessibilityIdentifier("home-feed-scroll-view")
         .shortPullRefresh(
             isEnabled: didLoad && isLoading == false,

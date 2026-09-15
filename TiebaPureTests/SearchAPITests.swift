@@ -129,6 +129,7 @@ final class SearchAPITests: XCTestCase {
         let cases: [(category: ForumThreadCategory, expectedSortType: Int32, isFeatured: Bool)] = [
             (.replyTime, 0, false),
             (.publishTime, 1, false),
+            (.hot, 2, false),
             (.featured, -1, true)
         ]
 
@@ -175,6 +176,7 @@ final class SearchAPITests: XCTestCase {
         let cases: [(category: ForumThreadCategory, expectedSortType: String, isFeatured: Bool)] = [
             (.replyTime, "0", false),
             (.publishTime, "1", false),
+            (.hot, "2", false),
             (.featured, "-1", true)
         ]
 

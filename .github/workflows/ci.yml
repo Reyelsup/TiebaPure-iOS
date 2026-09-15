@@ -26,6 +26,16 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
+      # The committed TiebaPure.xcodeproj is generated from project.yml.
+      # Regenerating it here guarantees newly added sources (and any
+      # project.yml edits) actually land in the build, and keeps the
+      # xcodegen consistency gate in scripts/package-unsigned-ipa.sh green.
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
       - name: Boot iPhone simulator
         run: |
           source scripts/ci-simulator.sh
@@ -126,3 +136,17 @@ jobs:
           test -f "$APP/SwiftProtobuf-Apache-2.0.txt"
           grep -Fq 'Apache License' "$APP/SwiftProtobuf-Apache-2.0.txt"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CADisableMinimumFrameDurationOnPhone' "$APP/Info.plist")" = true
+
+      - name: Package unsigned IPA
+        run: bash scripts/package-unsigned-ipa.sh
+
+      # Unsigned, so it still needs re-signing (AltStore/SideStore, a free or
+      # paid developer certificate, or a sideload tool) before it will run on
+      # a non-jailbroken device.
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiebaPure-unsigned-${{ github.sha }}
+          path: build/TiebaPure-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error

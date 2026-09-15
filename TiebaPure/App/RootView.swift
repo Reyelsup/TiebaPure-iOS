@@ -312,6 +312,14 @@ private struct MainTabView: View {
             Tab("首页", systemImage: "house", value: RootTab.home) {
                 HomeView(account: account, refreshToken: homeRefreshToken)
             }
+            // The native `tabReselectAction` fires the moment the user taps
+            // the already-selected home tab, before SwiftUI runs the
+            // selection binding. Using both this and the legacy UITabBar
+            // observer keeps the tap-to-refresh behaviour intact on every
+            // supported release path.
+            .tabReselectAction {
+                homeRefreshToken &+= 1
+            }
 
             Tab("进吧", systemImage: "square.grid.2x2", value: RootTab.forums) {
                 ForumHubView(account: account)

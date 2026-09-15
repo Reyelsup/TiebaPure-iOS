@@ -156,8 +156,15 @@ final class CrossVersionStateRegressionTests: XCTestCase,
         store.select(.featured, for: firstForum)
         XCTAssertEqual(
             store.selection(for: firstForum),
-            .publishTime,
-            "精华是页签而非最新排序偏好，不应覆盖此前选择"
+            .featured,
+            "热门 / 精华现在是独立的顶层分类，应该按用户选择持久化"
+        )
+
+        store.select(.hot, for: firstForum)
+        XCTAssertEqual(
+            store.selection(for: firstForum),
+            .hot,
+            "热门与精华并列，应该按用户选择持久化"
         )
 
         store.select(.publishTime, for: nameOnlyForum)

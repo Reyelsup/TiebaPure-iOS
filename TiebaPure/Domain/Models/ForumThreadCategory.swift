@@ -3,6 +3,7 @@ import Foundation
 enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
     case replyTime
     case publishTime
+    case hot
     case featured
 
     var id: Self { self }
@@ -13,6 +14,8 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .replyTime, .publishTime:
             return "最新"
+        case .hot:
+            return "热门"
         case .featured:
             return "精华"
         }
@@ -24,13 +27,20 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
             return "回复时间排序"
         case .publishTime:
             return "发帖时间排序"
+        case .hot:
+            return "热门"
         case .featured:
             return "精华"
         }
     }
 
     var belongsToLatestTab: Bool {
-        self != .featured
+        switch self {
+        case .replyTime, .publishTime:
+            return true
+        case .hot, .featured:
+            return false
+        }
     }
 
     var sortType: Int {
@@ -39,6 +49,8 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
             return 0
         case .publishTime:
             return 1
+        case .hot:
+            return 2
         case .featured:
             return -1
         }
@@ -54,6 +66,8 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
             return "forum-sort-reply-time"
         case .publishTime:
             return "forum-sort-publish-time"
+        case .hot:
+            return "forum-category-hot"
         case .featured:
             return "forum-category-featured"
         }
@@ -65,6 +79,8 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
             return "按最近回复时间排序"
         case .publishTime:
             return "按发帖时间排序"
+        case .hot:
+            return "按热度排序"
         case .featured:
             return "仅显示精华帖"
         }
@@ -83,6 +99,12 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
                 date: thread.createdAt ?? thread.lastReplyAt,
                 actionSuffix: "发布",
                 systemImage: "clock"
+            )
+        case .hot:
+            return ForumThreadMetadataPresentation(
+                date: thread.lastReplyAt ?? thread.createdAt,
+                actionSuffix: "回复",
+                systemImage: "flame.fill"
             )
         case .featured:
             return ForumThreadMetadataPresentation(
@@ -114,8 +136,7 @@ struct ForumThreadSortPreferenceStore {
         guard let rawValue = preferences[forumKey] else {
             return .replyTime
         }
-        guard let category = ForumThreadCategory(rawValue: rawValue),
-              category.belongsToLatestTab else {
+        guard let category = ForumThreadCategory(rawValue: rawValue) else {
             preferences.removeValue(forKey: forumKey)
             persist(preferences)
             return .replyTime
@@ -124,10 +145,11 @@ struct ForumThreadSortPreferenceStore {
     }
 
     func select(_ category: ForumThreadCategory, for forum: Forum) {
-        guard category.belongsToLatestTab else { return }
-
         var preferences = loadPreferences()
         let forumKey = Self.preferenceKey(for: forum)
+        // "最新" (replyTime) is the implicit default. Both the bare latest
+        // tab and the unsupported fallback clear the entry so the default
+        // value can be inferred from a missing key.
         if category == .replyTime {
             preferences.removeValue(forKey: forumKey)
         } else {
