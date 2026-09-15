@@ -117,20 +117,25 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
 
 struct ForumThreadSortPreferenceStore {
     static let storageKey = "dev.infinityf4p.tiebapure.forum-thread-sort"
+    static let selectionStorageKey = "dev.infinityf4p.tiebapure.forum-thread-selection"
 
     private let defaults: UserDefaults
     private let key: String
+    private let selectionKey: String
 
     init(
         defaults: UserDefaults = .standard,
-        key: String = ForumThreadSortPreferenceStore.storageKey
+        key: String = ForumThreadSortPreferenceStore.storageKey,
+        selectionKey: String = ForumThreadSortPreferenceStore.selectionStorageKey
     ) {
         self.defaults = defaults
         self.key = key
+        self.selectionKey = selectionKey
     }
 
+    /// The 最新 sub-sort remembered for this forum.
     func selection(for forum: Forum) -> ForumThreadCategory {
-        var preferences = loadPreferences()
+        var preferences = loadPreferences(from: key)
         let forumKey = Self.preferenceKey(for: forum)
         guard let rawValue = preferences[forumKey] else {
             return .replyTime
@@ -138,8 +143,25 @@ struct ForumThreadSortPreferenceStore {
         guard let category = ForumThreadCategory(rawValue: rawValue),
               category.belongsToLatestTab else {
             preferences.removeValue(forKey: forumKey)
-            persist(preferences)
+            persist(preferences, to: key)
             return .replyTime
+        }
+        return category
+    }
+
+    /// The tab the user last had open in this forum. Unlike `selection(for:)`
+    /// this remembers 热门 and 精华 as well, so coming back to a forum lands on
+    /// the tab the user left instead of always resetting to 最新.
+    func selectedCategory(for forum: Forum) -> ForumThreadCategory {
+        var preferences = loadPreferences(from: selectionKey)
+        let forumKey = Self.preferenceKey(for: forum)
+        guard let rawValue = preferences[forumKey] else {
+            return selection(for: forum)
+        }
+        guard let category = ForumThreadCategory(rawValue: rawValue) else {
+            preferences.removeValue(forKey: forumKey)
+            persist(preferences, to: selectionKey)
+            return selection(for: forum)
         }
         return category
     }
@@ -147,18 +169,33 @@ struct ForumThreadSortPreferenceStore {
     func select(_ category: ForumThreadCategory, for forum: Forum) {
         guard category.belongsToLatestTab else { return }
 
-        var preferences = loadPreferences()
+        var preferences = loadPreferences(from: key)
         let forumKey = Self.preferenceKey(for: forum)
         if category == .replyTime {
             preferences.removeValue(forKey: forumKey)
         } else {
             preferences[forumKey] = category.rawValue
         }
-        persist(preferences)
+        persist(preferences, to: key)
+        remember(category, for: forum)
+    }
+
+    /// Records which tab is open. 最新 is the default, so it is stored as an
+    /// absent entry rather than as a value.
+    func remember(_ category: ForumThreadCategory, for forum: Forum) {
+        var preferences = loadPreferences(from: selectionKey)
+        let forumKey = Self.preferenceKey(for: forum)
+        if category == .replyTime {
+            preferences.removeValue(forKey: forumKey)
+        } else {
+            preferences[forumKey] = category.rawValue
+        }
+        persist(preferences, to: selectionKey)
     }
 
     func reset() {
         defaults.removeObject(forKey: key)
+        defaults.removeObject(forKey: selectionKey)
     }
 
     static func preferenceKey(for forum: Forum) -> String {
@@ -170,7 +207,7 @@ struct ForumThreadSortPreferenceStore {
         return "id:\(forum.id)"
     }
 
-    private func loadPreferences() -> [String: String] {
+    private func loadPreferences(from key: String) -> [String: String] {
         guard let stored = defaults.dictionary(forKey: key) else {
             if defaults.object(forKey: key) != nil {
                 defaults.removeObject(forKey: key)
@@ -188,12 +225,12 @@ struct ForumThreadSortPreferenceStore {
             preferences[forumKey] = rawValue
         }
         if needsRepair {
-            persist(preferences)
+            persist(preferences, to: key)
         }
         return preferences
     }
 
-    private func persist(_ preferences: [String: String]) {
+    private func persist(_ preferences: [String: String], to key: String) {
         if preferences.isEmpty {
             defaults.removeObject(forKey: key)
         } else {

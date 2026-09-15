@@ -5447,7 +5447,9 @@ final class TiebaPureUITests: XCTestCase {
             "回到顶部后应重新显示精华分类"
         )
 
-        latestMenu.tap()
+        // 最新 switches tabs on a single tap and opens its sort menu on a long
+        // press, so choosing a sub-sort has to hold the tab down.
+        latestMenu.press(forDuration: 1.2)
         let publishTime = app.buttons["发帖时间排序"]
         XCTAssertTrue(publishTime.waitForExistence(timeout: 5))
         publishTime.tap()
@@ -5475,15 +5477,25 @@ final class TiebaPureUITests: XCTestCase {
         )
         XCTAssertFalse(app.buttons["精华分类测试帖"].exists)
 
+        // A single tap returns to 最新 on the sub-sort this forum was last on,
+        // which is 发帖时间.
         latestMenu.tap()
+        XCTAssertTrue(
+            app.buttons["发帖时间分类测试帖"].waitForExistence(timeout: 8),
+            "单击最新应直接切回上次的发帖时间排序"
+        )
+        XCTAssertFalse(app.buttons["热门分类测试帖"].exists)
+
+        // The sort menu is still reachable by holding the tab down.
+        latestMenu.press(forDuration: 1.2)
         let replyTime = app.buttons["回复时间排序"]
         XCTAssertTrue(replyTime.waitForExistence(timeout: 5))
         replyTime.tap()
         XCTAssertTrue(
             app.buttons["回复时间分类测试帖"].waitForExistence(timeout: 8),
-            "从精华返回最新并选择回复时间后应恢复对应内容"
+            "长按菜单选择回复时间后应恢复对应内容"
         )
-        XCTAssertFalse(app.buttons["精华分类测试帖"].exists)
+        XCTAssertFalse(app.buttons["发帖时间分类测试帖"].exists)
     }
 
     func testForumCategoryRaceKeepsOnlyLatestSelection() {
@@ -5502,7 +5514,7 @@ final class TiebaPureUITests: XCTestCase {
 
         // Initial 回复时间 is deliberately slow; 发帖时间 is slower than精华.
         // The final selection must win even when both cancelled responses arrive.
-        latestMenu.tap()
+        latestMenu.press(forDuration: 1.2)
         let publishTime = app.buttons["发帖时间排序"]
         XCTAssertTrue(publishTime.waitForExistence(timeout: 5))
         publishTime.tap()

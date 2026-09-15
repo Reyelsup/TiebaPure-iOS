@@ -114,6 +114,7 @@ struct HomeView: View {
                     initialDestination: threadRoute.initialDestination,
                     ownThreadDeletionTarget: threadRoute.ownThreadDeletionTarget,
                     mainPostFallback: threadRoute.mainPostFallback,
+                    forumFallback: threadRoute.forumFallback,
                     openUserInParent: { user in
                         openUser(user, sourceThreadID: threadRoute.threadID)
                     },
@@ -262,7 +263,10 @@ struct HomeView: View {
             threadID: thread.id,
             forumID: thread.forumID,
             initialDestination: initialDestination,
-            mainPostFallback: ThreadMainPostFallback(thread: thread)
+            mainPostFallback: ThreadMainPostFallback(thread: thread),
+            // The feed row already knows the forum's name and avatar, so the
+            // detail toolbar can show its chip before the page loads.
+            forumFallback: Forum.toolbarFallback(thread: thread)
         )
         if usesSplitDetailLayout {
             openThreadInSplitDetail(route)

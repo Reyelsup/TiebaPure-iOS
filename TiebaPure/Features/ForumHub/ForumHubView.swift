@@ -264,6 +264,7 @@ struct ForumHubView: View {
                     initialPostID: threadRoute.initialPostID,
                     initialDestination: threadRoute.initialDestination,
                     ownThreadDeletionTarget: threadRoute.ownThreadDeletionTarget,
+                    forumFallback: threadRoute.forumFallback,
                     openSearchInParent: { scope in
                         openSearch(scope)
                     },

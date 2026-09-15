@@ -13,6 +13,9 @@ struct ReaderSplitThreadRoute: Hashable {
     let initialDestination: ThreadDetailInitialDestination?
     let ownThreadDeletionTarget: OwnThreadDeletionTarget?
     let mainPostFallback: ThreadMainPostFallback?
+    /// Carried so the detail toolbar can render the forum chip before the page
+    /// loads; see `Forum.toolbarFallback(thread:)`.
+    let forumFallback: Forum?
 
     init(
         threadID: Int64,
@@ -20,7 +23,8 @@ struct ReaderSplitThreadRoute: Hashable {
         initialPostID: UInt64? = nil,
         initialDestination: ThreadDetailInitialDestination? = nil,
         ownThreadDeletionTarget: OwnThreadDeletionTarget? = nil,
-        mainPostFallback: ThreadMainPostFallback? = nil
+        mainPostFallback: ThreadMainPostFallback? = nil,
+        forumFallback: Forum? = nil
     ) {
         self.threadID = threadID
         self.forumID = forumID
@@ -28,6 +32,7 @@ struct ReaderSplitThreadRoute: Hashable {
         self.initialDestination = initialDestination
         self.ownThreadDeletionTarget = ownThreadDeletionTarget
         self.mainPostFallback = mainPostFallback
+        self.forumFallback = forumFallback
     }
 }
 
@@ -154,7 +159,8 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
                             initialPostID: route.initialPostID,
                             initialDestination: route.initialDestination,
                             ownThreadDeletionTarget: route.ownThreadDeletionTarget,
-                            mainPostFallback: route.mainPostFallback
+                            mainPostFallback: route.mainPostFallback,
+                            forumFallback: route.forumFallback
                         )
                         // Replacing the selection must never reuse the
                         // previous thread's loaded state.

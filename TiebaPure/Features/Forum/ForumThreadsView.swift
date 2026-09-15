@@ -60,9 +60,11 @@ struct ForumThreadsView: View {
         self.openThreadInParent = openThreadInParent
         self.openSearchInParent = openSearchInParent
         self.openUserInParent = openUserInParent
-        let storedCategory = sortPreferenceStore.selection(for: forum)
-        _selectedCategory = State(initialValue: storedCategory)
-        _latestSortCategory = State(initialValue: storedCategory)
+        let rememberedSort = sortPreferenceStore.selection(for: forum)
+        _latestSortCategory = State(initialValue: rememberedSort)
+        // The open tab is restored separately from the 最新 sub-sort so 热门
+        // and 精华 survive a round trip away from the forum.
+        _selectedCategory = State(initialValue: sortPreferenceStore.selectedCategory(for: forum))
     }
 
     var body: some View {
@@ -85,7 +87,8 @@ struct ForumThreadsView: View {
                 ThreadDetailView(
                     account: account,
                     threadID: activeThread.threadID,
-                    forumID: activeThread.forumID
+                    forumID: activeThread.forumID,
+                    forumFallback: forum
                 )
                 .interactiveNavigationPopStateSync {
                     self.activeThread = nil
@@ -314,16 +317,24 @@ struct ForumThreadsView: View {
                     systemImage: "chevron.down",
                     isSelected: selectedCategory.belongsToLatestTab
                 )
+            } primaryAction: {
+                // A single tap switches back to 最新 on whatever sub-sort this
+                // forum was last using, so returning from 热门 or 精华 is one
+                // tap instead of open-menu-then-pick. Choosing the sub-sort
+                // itself moved to long-press.
+                selectedCategory = latestSortCategory
+                sortPreferenceStore.remember(latestSortCategory, for: forum)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("最新")
             .accessibilityValue(latestSortCategory.sortOptionTitle)
-            .accessibilityHint("选择按回复时间或发帖时间排序")
+            .accessibilityHint("点击切回上次的排序，长按可选择按回复时间或发帖时间排序")
             .accessibilityAddTraits(selectedCategory.belongsToLatestTab ? .isSelected : [])
             .accessibilityIdentifier("forum-category-latest-menu")
 
             Button {
                 selectedCategory = .hot
+                sortPreferenceStore.remember(.hot, for: forum)
             } label: {
                 categoryTabLabel(
                     title: ForumThreadCategory.hot.topLevelTitle,
@@ -338,6 +349,7 @@ struct ForumThreadsView: View {
 
             Button {
                 selectedCategory = .featured
+                sortPreferenceStore.remember(.featured, for: forum)
             } label: {
                 categoryTabLabel(
                     title: "精华",
@@ -603,7 +615,11 @@ struct ForumThreadsView: View {
             if isReaderSplitListColumn == false {
                 navigationSourceLifecycle.beginParentNavigation()
             }
-            parentAction(ReaderSplitThreadRoute(threadID: threadID, forumID: forumID))
+            parentAction(ReaderSplitThreadRoute(
+                threadID: threadID,
+                forumID: forumID,
+                forumFallback: forum
+            ))
             return
         }
         activeThread = ForumThreadRoute(threadID: threadID, forumID: forumID)

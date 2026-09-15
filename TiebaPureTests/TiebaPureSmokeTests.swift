@@ -443,6 +443,91 @@ final class TiebaPureSmokeTests: XCTestCase {
         )
     }
 
+    func testForumCategorySelectionIsRememberedPerForum() {
+        let suiteName = "ForumCategorySelectionTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = ForumThreadSortPreferenceStore(defaults: defaults)
+        let forum = Forum(
+            id: 101,
+            name: "测试",
+            displayName: "测试吧",
+            avatarURL: nil,
+            memberCount: 0,
+            threadCount: 0
+        )
+        let otherForum = Forum(
+            id: 202,
+            name: "另一个",
+            displayName: "另一个吧",
+            avatarURL: nil,
+            memberCount: 0,
+            threadCount: 0
+        )
+
+        XCTAssertEqual(store.selectedCategory(for: forum), .replyTime)
+
+        // 精华 is a tab now, so it has to survive a round trip away from the
+        // forum without disturbing the 最新 sub-sort.
+        store.remember(.featured, for: forum)
+        XCTAssertEqual(store.selectedCategory(for: forum), .featured)
+        XCTAssertEqual(store.selection(for: forum), .replyTime)
+
+        // Picking a sub-sort records both the sort and the open tab.
+        store.select(.publishTime, for: forum)
+        XCTAssertEqual(store.selection(for: forum), .publishTime)
+        XCTAssertEqual(store.selectedCategory(for: forum), .publishTime)
+
+        store.remember(.hot, for: forum)
+        XCTAssertEqual(store.selectedCategory(for: forum), .hot)
+        XCTAssertEqual(
+            store.selection(for: forum),
+            .publishTime,
+            "切到热门不应覆盖最新页签下的排序偏好"
+        )
+
+        // Remembered per forum, not globally.
+        XCTAssertEqual(store.selectedCategory(for: otherForum), .replyTime)
+
+        // A fresh store over the same defaults sees the same state.
+        XCTAssertEqual(
+            ForumThreadSortPreferenceStore(defaults: defaults)
+                .selectedCategory(for: forum),
+            .hot
+        )
+
+        store.reset()
+        XCTAssertEqual(store.selectedCategory(for: forum), .replyTime)
+    }
+
+    func testForumToolbarFallbackCarriesTheThreadsForumIdentity() {
+        let thread = ThreadSummary(
+            id: 1,
+            title: "标题",
+            author: UserSummary(id: 1, name: "author", displayName: "作者", portrait: ""),
+            forumName: "抗压背锅",
+            forumAvatarURL: URL(string: "https://example.com/avatar.png"),
+            replyCount: 0,
+            viewCount: 0,
+            blocks: []
+        )
+
+        let forum = Forum.toolbarFallback(thread: thread)
+        XCTAssertEqual(forum?.name, "抗压背锅")
+        XCTAssertEqual(forum?.displayName, "抗压背锅吧")
+        XCTAssertEqual(forum?.avatarURL, URL(string: "https://example.com/avatar.png"))
+
+        var namedWithSuffix = thread
+        namedWithSuffix.forumName = "抗压背锅吧"
+        XCTAssertEqual(Forum.toolbarFallback(thread: namedWithSuffix)?.displayName, "抗压背锅吧")
+
+        // A row that does not name its forum cannot build one, and the toolbar
+        // then falls back to its placeholder.
+        var unnamed = thread
+        unnamed.forumName = nil
+        XCTAssertNil(Forum.toolbarFallback(thread: unnamed))
+    }
+
     func testForumThreadCategoryMetadataMatchesItsServerSortTimestamp() {
         let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
         let lastReplyAt = Date(timeIntervalSince1970: 1_700_000_600)

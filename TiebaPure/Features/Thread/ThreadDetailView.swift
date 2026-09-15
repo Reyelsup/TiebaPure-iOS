@@ -17,6 +17,11 @@ struct ThreadDetailView: View {
     let initialPostID: UInt64?
     let initialDestination: ThreadDetailInitialDestination?
     private let mainPostFallback: ThreadMainPostFallback?
+    /// The forum this thread belongs to, already known by the list the thread
+    /// was opened from. The toolbar renders the chip from this before the page
+    /// arrives, which removes the swap that used to happen when the forum name
+    /// landed a moment after the push.
+    private let forumFallback: Forum?
     private let ownThreadDeletionTarget: OwnThreadDeletionTarget?
     private let onOwnThreadDeleted: ((Int64) -> Void)?
     private let onOwnThreadDeletionNeedsRefresh: (() -> Void)?
@@ -103,6 +108,7 @@ struct ThreadDetailView: View {
         initialDestination: ThreadDetailInitialDestination? = nil,
         ownThreadDeletionTarget: OwnThreadDeletionTarget? = nil,
         mainPostFallback: ThreadMainPostFallback? = nil,
+        forumFallback: Forum? = nil,
         onOwnThreadDeleted: ((Int64) -> Void)? = nil,
         onOwnThreadDeletionNeedsRefresh: (() -> Void)? = nil,
         openSearchInParent: ((SearchScope) -> Void)? = nil,
@@ -115,6 +121,7 @@ struct ThreadDetailView: View {
         self.initialPostID = initialPostID
         self.initialDestination = initialDestination
         self.mainPostFallback = mainPostFallback
+        self.forumFallback = forumFallback
         self.ownThreadDeletionTarget = ownThreadDeletionTarget
         self.onOwnThreadDeleted = onOwnThreadDeleted
         self.onOwnThreadDeletionNeedsRefresh = onOwnThreadDeletionNeedsRefresh
@@ -742,7 +749,10 @@ struct ThreadDetailView: View {
 
     @ViewBuilder
     private var forumToolbarTitle: some View {
-        if let forum = threadPage?.forum {
+        // The fallback keeps the chip's identity on screen from the first
+        // frame. Without it the title starts as a bare 帖子 label and swaps to
+        // the forum chip once the page lands, which reads as a flash.
+        if let forum = threadPage?.forum ?? forumFallback {
             Button {
                 openForum(forum)
             } label: {
@@ -761,7 +771,17 @@ struct ThreadDetailView: View {
         Button(action: toggleCollection) {
             Image(systemName: isCollected ? "star.fill" : "star")
         }
-        .disabled(threadPage == nil || isUpdatingCollection || (mainPost?.id ?? 0) == 0)
+        // A page that is still loading leaves the star enabled on purpose. The
+        // system draws a disabled bar button at reduced opacity, so gating on
+        // `threadPage` made the star fade in a moment after the push and read
+        // as the toolbar assembling itself. `toggleCollection` already no-ops
+        // until the page is there, and the hint below covers the states where
+        // favouriting is genuinely unavailable.
+        .disabled(
+            account == nil
+                || isUpdatingCollection
+                || (didLoad && markedPostIDForAccountFavorite == 0)
+        )
         .accessibilityLabel(isCollected ? "取消收藏帖子" : "收藏帖子")
         .accessibilityValue(isCollected ? "已收藏" : "未收藏")
         .accessibilityHint(favoriteAccessibilityHint)
