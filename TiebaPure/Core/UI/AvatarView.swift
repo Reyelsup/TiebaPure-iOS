@@ -1159,6 +1159,12 @@ struct AvatarView: View {
     let title: String?
     let size: CGFloat
 
+    /// Avatars sit in a column and their small images resolve at almost the
+    /// same moment, so without this the whole strip flips from placeholder
+    /// discs to pictures in a single frame and reads as a flash. Dissolving
+    /// each one in keeps the change inside the appearance instead of popping.
+    @State private var isImageResolved = false
+
     init(url: URL?, title: String? = nil, size: CGFloat = TiebaPureTheme.AvatarSize.medium) {
         self.url = url
         self.title = title
@@ -1179,8 +1185,13 @@ struct AvatarView: View {
                     ),
                     contentMode: .fill,
                     showsProgress: false,
-                    showsRetryButton: false
+                    showsRetryButton: false,
+                    onLoadStateChange: { state in
+                        isImageResolved = state == .success
+                    }
                 )
+                .opacity(isImageResolved ? 1 : 0)
+                .animation(.easeInOut(duration: 0.22), value: isImageResolved)
             } else {
                 placeholder
             }
