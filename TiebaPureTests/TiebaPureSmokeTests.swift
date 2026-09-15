@@ -3216,6 +3216,24 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertTrue(RootTabHitTester.itemFrames(in: bar, itemCount: 0).isEmpty)
     }
 
+    func testTabReselectRequiresTheTappedTabToHaveBeenSelectedAlready() {
+        XCTAssertTrue(
+            TabReselectPolicy.isReselect(tapped: .home, selectionBeforeTouch: .home)
+        )
+        XCTAssertFalse(
+            TabReselectPolicy.isReselect(tapped: .home, selectionBeforeTouch: .forums)
+        )
+        XCTAssertFalse(
+            TabReselectPolicy.isReselect(tapped: .forums, selectionBeforeTouch: .home)
+        )
+        XCTAssertFalse(
+            TabReselectPolicy.isReselect(tapped: .me, selectionBeforeTouch: nil)
+        )
+        XCTAssertFalse(
+            TabReselectPolicy.isReselect(tapped: nil, selectionBeforeTouch: .home)
+        )
+    }
+
     func testPaginationPrefetchStartsBeforeTheLastItem() {
         XCTAssertFalse(PaginationPrefetchPolicy.shouldLoadMore(currentIndex: 14, totalCount: 20))
         XCTAssertTrue(PaginationPrefetchPolicy.shouldLoadMore(currentIndex: 15, totalCount: 20))

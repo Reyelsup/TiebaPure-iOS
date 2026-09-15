@@ -457,6 +457,7 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
         private weak var observedController: UITabBarController?
         private weak var previousDelegate: UITabBarControllerDelegate?
         private weak var tabBarTapRecognizer: UITapGestureRecognizer?
+        private var selectionBeforeTouch: RootTab?
         private var lastReselectUptime: TimeInterval = 0
 
         init(onReselectHome: @escaping () -> Void) {
@@ -509,6 +510,7 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
         }
 
         @objc private func handleTabBarTap(_ recognizer: UITapGestureRecognizer) {
+            defer { selectionBeforeTouch = nil }
             guard recognizer.state == .ended,
                   let tabBarController = observedController else { return }
             let tabBar = tabBarController.tabBar
@@ -518,9 +520,26 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
                 in: tabBar.bounds,
                 itemCount: tabBar.items?.count ?? 0
             )
-            guard let tappedTab = RootTabHitTester.tab(at: point, itemFrames: itemFrames),
-                  tappedTab == RootTab(tabIndex: tabBarController.selectedIndex) else { return }
+            let tappedTab = RootTabHitTester.tab(at: point, itemFrames: itemFrames)
+            guard TabReselectPolicy.isReselect(
+                tapped: tappedTab,
+                selectionBeforeTouch: selectionBeforeTouch
+            ) else { return }
             fireReselect()
+        }
+
+        /// Runs as the touch begins, before UIKit acts on the tap, so this is
+        /// still the tab the user was looking at when they put their finger
+        /// down. Reading the selection at tap time instead would count every
+        /// switch back to 首页 as a re-tap and refresh a feed nobody re-tapped.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldReceive touch: UITouch
+        ) -> Bool {
+            selectionBeforeTouch = observedController.flatMap {
+                RootTab(tabIndex: $0.selectedIndex)
+            }
+            return true
         }
 
         func gestureRecognizer(
@@ -547,6 +566,9 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
             ) ?? true
             guard permitsSelection else { return false }
 
+            // `shouldSelect` runs before UIKit moves the selection, so here the
+            // tapped controller still being the selected one already means the
+            // user re-tapped the tab they were on.
             if tabBarController.selectedViewController === viewController,
                tabBarController.viewControllers?.first === viewController {
                 fireReselect()
@@ -571,6 +593,17 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
             }
             return super.forwardingTarget(for: aSelector)
         }
+    }
+}
+
+/// A tab bar re-tap only counts when the tapped item was already the selected
+/// one. UIKit updates the selection while it handles the same touch, so the
+/// gesture hook has to compare against the selection captured as the touch
+/// began rather than the selection at tap time.
+enum TabReselectPolicy {
+    static func isReselect(tapped: RootTab?, selectionBeforeTouch: RootTab?) -> Bool {
+        guard let tapped, let selectionBeforeTouch else { return false }
+        return tapped == selectionBeforeTouch
     }
 }
 
