@@ -1228,6 +1228,9 @@ struct ThreadDetailView: View {
                 guard isLoading == false else { return }
                 await reload()
             }
+            // Applied outside the refresh modifier so the scroll view keeps
+            // its direct pan-observer attachment.
+            .softScrollEdgeEffect()
             .coordinateSpace(name: ThreadDetailScrollCoordinateSpace.name)
             .onPreferenceChange(ThreadPostViewportPreferenceKey.self) { entries in
                 correctPendingPreciseScroll(entries: entries, proxy: scrollProxy)

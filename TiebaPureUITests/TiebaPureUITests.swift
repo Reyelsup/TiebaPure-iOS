@@ -5401,8 +5401,9 @@ final class TiebaPureUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
         let latestMenu = app.buttons["forum-category-latest-menu"]
+        let hot = app.descendants(matching: .any)["forum-category-hot"]
         let featured = app.descendants(matching: .any)["forum-category-featured"]
-        for control in [latestMenu, featured] {
+        for control in [latestMenu, hot, featured] {
             XCTAssertTrue(control.waitForExistence(timeout: 5))
             XCTAssertTrue(waitForHittable(control, expected: true, timeout: 5))
             XCTAssertGreaterThanOrEqual(control.frame.height, 44)
@@ -5466,6 +5467,13 @@ final class TiebaPureUITests: XCTestCase {
             "切换到精华后应提交并展示精华分类响应"
         )
         XCTAssertFalse(app.buttons["发帖时间分类测试帖"].exists)
+
+        hot.tap()
+        XCTAssertTrue(
+            app.buttons["热门分类测试帖"].waitForExistence(timeout: 8),
+            "切换到热门后应提交并展示热门分类响应"
+        )
+        XCTAssertFalse(app.buttons["精华分类测试帖"].exists)
 
         latestMenu.tap()
         let replyTime = app.buttons["回复时间排序"]

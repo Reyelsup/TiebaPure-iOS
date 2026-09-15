@@ -3,6 +3,7 @@ import Foundation
 enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
     case replyTime
     case publishTime
+    case hot
     case featured
 
     var id: Self { self }
@@ -13,6 +14,8 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .replyTime, .publishTime:
             return "最新"
+        case .hot:
+            return "热门"
         case .featured:
             return "精华"
         }
@@ -24,21 +27,33 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
             return "回复时间排序"
         case .publishTime:
             return "发帖时间排序"
+        case .hot:
+            return "热门"
         case .featured:
             return "精华"
         }
     }
 
     var belongsToLatestTab: Bool {
-        self != .featured
+        Self.latestSortOptions.contains(self)
     }
 
+    /// Server `sort_type` values for `/c/f/frs/page`.
+    ///
+    /// `replyTime` must stay on 6 rather than 0: on a forum with a hot
+    /// partition 0 already means hot ordering, which would make the 最新 and
+    /// 热门 tabs render the same page. 6 is the explicit reply-time value and
+    /// keeps its meaning on every forum, with or without a hot partition.
+    /// `hot` falls back to reply-time ordering on forums that have no hot
+    /// partition, which is what the server does for the official client too.
     var sortType: Int {
         switch self {
         case .replyTime:
-            return 0
+            return 6
         case .publishTime:
             return 1
+        case .hot:
+            return 3
         case .featured:
             return -1
         }
@@ -54,6 +69,8 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
             return "forum-sort-reply-time"
         case .publishTime:
             return "forum-sort-publish-time"
+        case .hot:
+            return "forum-category-hot"
         case .featured:
             return "forum-category-featured"
         }
@@ -65,6 +82,8 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
             return "按最近回复时间排序"
         case .publishTime:
             return "按发帖时间排序"
+        case .hot:
+            return "查看本吧热门帖子"
         case .featured:
             return "仅显示精华帖"
         }
@@ -72,7 +91,7 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
 
     func metadata(for thread: ThreadSummary) -> ForumThreadMetadataPresentation {
         switch self {
-        case .replyTime:
+        case .replyTime, .featured:
             return ForumThreadMetadataPresentation(
                 date: thread.lastReplyAt ?? thread.createdAt,
                 actionSuffix: "回复",
@@ -84,11 +103,13 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
                 actionSuffix: "发布",
                 systemImage: "clock"
             )
-        case .featured:
+        case .hot:
+            // A hot listing has no per-thread heat value in the forum page
+            // response, so it keeps showing when the thread last moved.
             return ForumThreadMetadataPresentation(
                 date: thread.lastReplyAt ?? thread.createdAt,
                 actionSuffix: "回复",
-                systemImage: "bubble.left.and.text.bubble.right"
+                systemImage: "flame"
             )
         }
     }

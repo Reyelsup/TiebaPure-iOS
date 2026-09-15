@@ -165,16 +165,17 @@ struct HomeView: View {
             await reload(trigger: .initial)
         }
         .onChange(of: refreshToken) { _ in
-            // Tab re-tap while pushed pops to root instead of refreshing
-            // the covered feed, matching the iOS tab-reselect convention. In
-            // the split layout the detail selection likewise clears back to
-            // the placeholder without reloading.
-            if navigationPath.isEmpty == false || activeSearch != nil
-                || splitDetailPath.isEmpty == false {
+            // Re-tapping the home tab always refreshes the feed. Anything
+            // pushed over it is popped first so the refreshed feed is what the
+            // user actually sees, which keeps the iOS tab-reselect convention
+            // of returning to the root of the tab.
+            let coversFeed = navigationPath.isEmpty == false
+                || activeSearch != nil
+                || splitDetailPath.isEmpty == false
+            if coversFeed {
                 navigationPath = []
                 activeSearch = nil
                 splitDetailPath = []
-                return
             }
             programmaticRefreshToken &+= 1
         }
@@ -555,6 +556,9 @@ struct HomeView: View {
                 trigger: source == .programmatic ? .tabTap : .pullToRefresh
             )
         }
+        // Applied outside the refresh modifier so the scroll view keeps its
+        // direct pan-observer attachment.
+        .softScrollEdgeEffect()
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
     }
 

@@ -394,28 +394,52 @@ final class TiebaPureSmokeTests: XCTestCase {
     }
 
     func testForumThreadCategoriesMapAPIParametersAndAccessibilityIdentifiers() {
-        XCTAssertEqual(ForumThreadCategory.allCases, [.replyTime, .publishTime, .featured])
+        XCTAssertEqual(
+            ForumThreadCategory.allCases,
+            [.replyTime, .publishTime, .hot, .featured]
+        )
         XCTAssertEqual(ForumThreadCategory.latestSortOptions, [.replyTime, .publishTime])
-        XCTAssertEqual(ForumThreadCategory.allCases.map(\.topLevelTitle), ["最新", "最新", "精华"])
+        XCTAssertEqual(
+            ForumThreadCategory.allCases.map(\.topLevelTitle),
+            ["最新", "最新", "热门", "精华"]
+        )
         XCTAssertEqual(
             ForumThreadCategory.allCases.map(\.sortOptionTitle),
-            ["回复时间排序", "发帖时间排序", "精华"]
+            ["回复时间排序", "发帖时间排序", "热门", "精华"]
         )
         XCTAssertEqual(
             ForumThreadCategory.allCases.map(\.belongsToLatestTab),
-            [true, true, false]
+            [true, true, false, false]
         )
-        XCTAssertEqual(ForumThreadCategory.allCases.map(\.sortType), [0, 1, -1])
+        XCTAssertEqual(ForumThreadCategory.allCases.map(\.sortType), [6, 1, 3, -1])
         XCTAssertNil(ForumThreadCategory.replyTime.goodClassifyID)
         XCTAssertNil(ForumThreadCategory.publishTime.goodClassifyID)
+        XCTAssertNil(ForumThreadCategory.hot.goodClassifyID)
         XCTAssertEqual(ForumThreadCategory.featured.goodClassifyID, 0)
         XCTAssertEqual(
             ForumThreadCategory.allCases.map(\.accessibilityIdentifier),
-            ["forum-sort-reply-time", "forum-sort-publish-time", "forum-category-featured"]
+            [
+                "forum-sort-reply-time",
+                "forum-sort-publish-time",
+                "forum-category-hot",
+                "forum-category-featured"
+            ]
         )
         XCTAssertEqual(
             ForumThreadCategory.allCases.map(\.accessibilityHint),
-            ["按最近回复时间排序", "按发帖时间排序", "仅显示精华帖"]
+            ["按最近回复时间排序", "按发帖时间排序", "查看本吧热门帖子", "仅显示精华帖"]
+        )
+    }
+
+    func testLatestAndHotTabsNeverShareAServerSortValue() {
+        // A forum with a hot partition treats sort_type 0 as hot ordering, so
+        // 最新 has to stay on the explicit reply-time value or the two tabs
+        // would submit the same request and render the same page.
+        XCTAssertEqual(ForumThreadCategory.replyTime.sortType, 6)
+        XCTAssertEqual(ForumThreadCategory.hot.sortType, 3)
+        XCTAssertNotEqual(
+            ForumThreadCategory.replyTime.sortType,
+            ForumThreadCategory.hot.sortType
         )
     }
 
@@ -447,6 +471,14 @@ final class TiebaPureSmokeTests: XCTestCase {
                 date: createdAt,
                 actionSuffix: "发布",
                 systemImage: "clock"
+            )
+        )
+        XCTAssertEqual(
+            ForumThreadCategory.hot.metadata(for: thread),
+            ForumThreadMetadataPresentation(
+                date: lastReplyAt,
+                actionSuffix: "回复",
+                systemImage: "flame"
             )
         )
         XCTAssertEqual(

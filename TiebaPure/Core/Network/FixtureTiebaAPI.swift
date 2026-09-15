@@ -93,6 +93,10 @@ struct FixtureTiebaAPI: TiebaAPIService {
                 delay = 900_000_000
             case .publishTime:
                 delay = 450_000_000
+            case .hot:
+                // Kept distinct from the other three so a future race test can
+                // order 热门 against any of them.
+                delay = 120_000_000
             case .featured:
                 delay = 60_000_000
             }
@@ -141,6 +145,8 @@ struct FixtureTiebaAPI: TiebaAPIService {
                 fixtureThreads[0].title = "回复时间分类测试帖"
             case .publishTime:
                 fixtureThreads[0].title = "发帖时间分类测试帖"
+            case .hot:
+                fixtureThreads[0].title = "热门分类测试帖"
             case .featured:
                 fixtureThreads[0].title = "精华分类测试帖"
             }

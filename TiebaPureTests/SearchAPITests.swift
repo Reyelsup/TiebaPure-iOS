@@ -127,8 +127,9 @@ final class SearchAPITests: XCTestCase {
 
     func testForumCategoryProtobufRequestEncodesFirstPageAndPaginationFields() async throws {
         let cases: [(category: ForumThreadCategory, expectedSortType: Int32, isFeatured: Bool)] = [
-            (.replyTime, 0, false),
+            (.replyTime, 6, false),
             (.publishTime, 1, false),
+            (.hot, 3, false),
             (.featured, -1, true)
         ]
 
@@ -173,8 +174,9 @@ final class SearchAPITests: XCTestCase {
 
     func testAnonymousForumCategoryFormRequestEncodesFields() async throws {
         let cases: [(category: ForumThreadCategory, expectedSortType: String, isFeatured: Bool)] = [
-            (.replyTime, "0", false),
+            (.replyTime, "6", false),
             (.publishTime, "1", false),
+            (.hot, "3", false),
             (.featured, "-1", true)
         ]
 
@@ -329,8 +331,9 @@ final class SearchAPITests: XCTestCase {
 
     func testForumCategoryFallbackPreservesFormFieldsAfterProtobufDecodeFailure() async throws {
         let cases: [(category: ForumThreadCategory, expectedSortType: String, isFeatured: Bool)] = [
-            (.replyTime, "0", false),
+            (.replyTime, "6", false),
             (.publishTime, "1", false),
+            (.hot, "3", false),
             (.featured, "-1", true)
         ]
 

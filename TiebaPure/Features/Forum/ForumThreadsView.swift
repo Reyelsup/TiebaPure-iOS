@@ -323,6 +323,20 @@ struct ForumThreadsView: View {
             .accessibilityIdentifier("forum-category-latest-menu")
 
             Button {
+                selectedCategory = .hot
+            } label: {
+                categoryTabLabel(
+                    title: ForumThreadCategory.hot.topLevelTitle,
+                    isSelected: selectedCategory == .hot
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(ForumThreadCategory.hot.topLevelTitle)
+            .accessibilityHint(ForumThreadCategory.hot.accessibilityHint)
+            .accessibilityAddTraits(selectedCategory == .hot ? .isSelected : [])
+            .accessibilityIdentifier(ForumThreadCategory.hot.accessibilityIdentifier)
+
+            Button {
                 selectedCategory = .featured
             } label: {
                 categoryTabLabel(
@@ -408,6 +422,9 @@ struct ForumThreadsView: View {
                 guard isLoading == false else { return }
                 await reload()
             }
+            // Applied outside the refresh modifier so the scroll view keeps
+            // its direct pan-observer attachment.
+            .softScrollEdgeEffect()
             .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         }
     }

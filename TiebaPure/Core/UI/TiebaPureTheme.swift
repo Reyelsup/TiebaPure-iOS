@@ -53,6 +53,25 @@ extension View {
         frame(minWidth: 44, minHeight: 44)
     }
 
+    /// iOS 26 blends scrolling content into the Liquid Glass toolbars with a
+    /// scroll edge effect. The default style draws a hard seam right below the
+    /// navigation bar and above the floating tab bar; reading surfaces look
+    /// better with the soft variant Apple documents alongside it.
+    ///
+    /// Apple warns that soft edges separate content less strongly than the
+    /// default, so anything pinned to an edge (fixed table headers, text that
+    /// sits outside the Liquid Glass controls) still has to stay legible in
+    /// every scroll position. On iOS 16.4 – 25 there is no edge effect at all
+    /// and this is a no-op.
+    @ViewBuilder
+    func softScrollEdgeEffect(for edges: Edge.Set = .all) -> some View {
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectStyle(.soft, for: edges)
+        } else {
+            self
+        }
+    }
+
 }
 
 enum PaginationPrefetchPolicy {

@@ -283,6 +283,7 @@ private struct ExternalRouteView: View {
                 }
             }
         }
+        .softScrollEdgeEffect()
     }
 }
 
@@ -299,6 +300,10 @@ private struct MainTabView: View {
                 legacyTabView
             }
         }
+        // One style for every tab: content now fades into the navigation bar
+        // and the floating Liquid Glass tab bar instead of ending on a hard
+        // seam.
+        .softScrollEdgeEffect()
         .background(
             TabSelectionObserver {
                 homeRefreshToken += 1

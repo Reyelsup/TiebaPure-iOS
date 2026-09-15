@@ -192,6 +192,9 @@ struct ForumHubView: View {
                 await loadFollowed(account: account)
             }
         }
+        // Applied outside the refresh modifier so the scroll view keeps its
+        // direct pan-observer attachment.
+        .softScrollEdgeEffect()
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("进吧")
         .navigationBarTitleDisplayMode(.inline)

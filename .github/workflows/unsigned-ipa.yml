@@ -1,0 +1,72 @@
+name: Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+      - 'fix/**'
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unsigned-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  package-unsigned-ipa:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      # The packaging script refuses to run without xcodegen: it regenerates
+      # the project from project.yml and fails the build if the checked-in
+      # TiebaPure.xcodeproj has drifted, which is exactly the guard that keeps
+      # a downloaded IPA matching the sources it claims to come from.
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Package unsigned IPA
+        run: |
+          scripts/package-unsigned-ipa.sh
+          test -f build/TiebaPure-unsigned.ipa
+
+      - name: Verify package
+        run: |
+          rm -rf /tmp/ipa-check
+          mkdir -p /tmp/ipa-check
+          /usr/bin/ditto -x -k build/TiebaPure-unsigned.ipa /tmp/ipa-check
+          test -x /tmp/ipa-check/Payload/TiebaPure.app/TiebaPure
+          test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' \
+            /tmp/ipa-check/Payload/TiebaPure.app/Info.plist)" = 16.4
+          test -d /tmp/ipa-check/Payload/TiebaPure.app/PlugIns/TiebaPureOpenIn.appex
+          test ! -d /tmp/ipa-check/Payload/TiebaPure.app/_CodeSignature
+          ls -lh build/TiebaPure-unsigned.ipa
+
+      - name: Summarize
+        run: |
+          {
+            echo "### Unsigned IPA"
+            echo
+            echo "- ref: \`${{ github.ref_name }}\`"
+            echo "- commit: \`${{ github.sha }}\`"
+            echo "- artifact: \`TiebaPure-unsigned-ipa\`"
+            echo
+            echo "下载后需要用自己的证书重新签名（AltStore / Sideloadly / TrollStore 等）才能安装。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiebaPure-unsigned-ipa
+          path: build/TiebaPure-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
