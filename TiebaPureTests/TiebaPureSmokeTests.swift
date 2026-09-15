@@ -514,12 +514,12 @@ final class TiebaPureSmokeTests: XCTestCase {
 
         let forum = Forum.toolbarFallback(thread: thread)
         XCTAssertEqual(forum?.name, "抗压背锅")
-        XCTAssertEqual(forum?.displayName, "抗压背锅吧")
         XCTAssertEqual(forum?.avatarURL, URL(string: "https://example.com/avatar.png"))
-
-        var namedWithSuffix = thread
-        namedWithSuffix.forumName = "抗压背锅吧"
-        XCTAssertEqual(Forum.toolbarFallback(thread: namedWithSuffix)?.displayName, "抗压背锅吧")
+        XCTAssertEqual(
+            forum?.displayName,
+            "抗压背锅",
+            "回退名必须和加载后服务器给的名字完全一致，否则胶囊会先显示一个名字再翻成另一个"
+        )
 
         // A row that does not name its forum cannot build one, and the toolbar
         // then falls back to its placeholder.
