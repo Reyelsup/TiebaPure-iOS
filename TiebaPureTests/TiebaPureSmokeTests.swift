@@ -3201,6 +3201,21 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertNil(RootTabHitTester.tab(at: CGPoint(x: 320, y: 20), itemFrames: []))
     }
 
+    func testRootTabItemFramesSplitTheBarEvenly() {
+        let bar = CGRect(x: 0, y: 0, width: 300, height: 45)
+        let frames = RootTabHitTester.itemFrames(in: bar, itemCount: 3)
+        XCTAssertEqual(frames.count, 3)
+        XCTAssertEqual(frames[0], CGRect(x: 0, y: 0, width: 100, height: 45))
+        XCTAssertEqual(frames[1], CGRect(x: 100, y: 0, width: 100, height: 45))
+        XCTAssertEqual(frames[2], CGRect(x: 200, y: 0, width: 100, height: 45))
+        XCTAssertEqual(
+            RootTabHitTester.tab(at: CGPoint(x: 250, y: 20), itemFrames: frames),
+            .me
+        )
+        XCTAssertTrue(RootTabHitTester.itemFrames(in: .zero, itemCount: 3).isEmpty)
+        XCTAssertTrue(RootTabHitTester.itemFrames(in: bar, itemCount: 0).isEmpty)
+    }
+
     func testPaginationPrefetchStartsBeforeTheLastItem() {
         XCTAssertFalse(PaginationPrefetchPolicy.shouldLoadMore(currentIndex: 14, totalCount: 20))
         XCTAssertTrue(PaginationPrefetchPolicy.shouldLoadMore(currentIndex: 15, totalCount: 20))

@@ -746,8 +746,9 @@ struct ThreadDetailView: View {
             Button {
                 openForum(forum)
             } label: {
+                // The chip owns its full bar-control height now, so the old
+                // 44pt minimum only added an invisible frame on top of it.
                 ForumToolbarTitle(forum: forum)
-                    .frame(minHeight: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -2558,11 +2559,28 @@ private struct ForumToolbarTitle: View {
             }
         }
         .padding(.horizontal, TiebaPureTheme.Spacing.xs)
-        .padding(.vertical, 5)
-        .background(
-            Capsule(style: .continuous)
-                .fill(TiebaPureTheme.ColorToken.readerSecondarySurface)
-        )
+        // Matching the system controls' height also fixes the corner radius,
+        // which is half the height on a capsule.
+        .frame(minHeight: TiebaPureTheme.ToolbarGlass.controlHeight)
+        .forumToolbarCapsule()
+    }
+}
+
+private extension View {
+    /// iOS 26 draws Liquid Glass behind its own toolbar controls but not behind
+    /// a custom view placed in the title slot, which is why this chip used to
+    /// read as an opaque pill between two glass ones. Earlier systems have no
+    /// such material, so they keep the flat capsule the app has always used.
+    @ViewBuilder
+    func forumToolbarCapsule() -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular.interactive())
+        } else {
+            background(
+                Capsule(style: .continuous)
+                    .fill(TiebaPureTheme.ColorToken.readerSecondarySurface)
+            )
+        }
     }
 }
 

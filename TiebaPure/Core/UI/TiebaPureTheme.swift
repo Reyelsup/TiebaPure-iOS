@@ -33,6 +33,24 @@ enum TiebaPureTheme {
         static let maxTablet: CGFloat = 680
     }
 
+    /// Metrics for the Liquid Glass controls the system draws in a navigation
+    /// bar. A custom toolbar control has to match them or it reads as a
+    /// different, cheaper material sitting in the same row.
+    enum ToolbarGlass {
+        /// Measured from an iOS 26 device screenshot: the system back button
+        /// and the trailing button group are both 132px tall, which is 45pt on
+        /// that device. The app's own forum chip was 34pt — 11pt short — so
+        /// its capsule radius (half the height) was wrong too.
+        ///
+        /// Earlier systems use the compact bar control instead.
+        static var controlHeight: CGFloat {
+            if #available(iOS 26.0, *) {
+                return 45
+            }
+            return 34
+        }
+    }
+
     enum ColorToken {
         static let primaryAccent = Color(uiColor: .systemBlue)
         static let videoAccent = Color(red: 0.96, green: 0.62, blue: 0.04)

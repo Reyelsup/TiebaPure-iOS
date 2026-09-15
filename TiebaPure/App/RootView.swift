@@ -452,31 +452,89 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, UITabBarControllerDelegate {
+    final class Coordinator: NSObject, UITabBarControllerDelegate, UIGestureRecognizerDelegate {
         var onReselectHome: () -> Void
         private weak var observedController: UITabBarController?
         private weak var previousDelegate: UITabBarControllerDelegate?
+        private weak var tabBarTapRecognizer: UITapGestureRecognizer?
+        private var lastReselectUptime: TimeInterval = 0
 
         init(onReselectHome: @escaping () -> Void) {
             self.onReselectHome = onReselectHome
         }
 
         func attach(to tabBarController: UITabBarController) {
-            guard observedController !== tabBarController || tabBarController.delegate !== self else {
-                return
+            if observedController !== tabBarController || tabBarController.delegate !== self {
+                detach()
+                previousDelegate = tabBarController.delegate
+                observedController = tabBarController
+                tabBarController.delegate = self
             }
-            detach()
-            previousDelegate = tabBarController.delegate
-            observedController = tabBarController
-            tabBarController.delegate = self
+            installTabBarTapRecognizer(on: tabBarController)
         }
 
         func detach() {
             if let observedController, observedController.delegate === self {
                 observedController.delegate = previousDelegate
             }
+            if let tabBarTapRecognizer {
+                tabBarTapRecognizer.view?.removeGestureRecognizer(tabBarTapRecognizer)
+            }
+            tabBarTapRecognizer = nil
             observedController = nil
             previousDelegate = nil
+        }
+
+        /// SwiftUI installs its own tab bar controller delegate, so the hook
+        /// below can be replaced without notice and a re-tap would then go
+        /// unnoticed. Reading the tap straight off the bar cannot be taken
+        /// away by the framework, and both hooks funnel through the same
+        /// debounce so a single tap never refreshes the feed twice.
+        private func installTabBarTapRecognizer(on tabBarController: UITabBarController) {
+            let tabBar = tabBarController.tabBar
+            guard tabBarTapRecognizer?.view !== tabBar else { return }
+            if let existing = tabBarTapRecognizer {
+                existing.view?.removeGestureRecognizer(existing)
+            }
+            let recognizer = UITapGestureRecognizer(
+                target: self,
+                action: #selector(handleTabBarTap(_:))
+            )
+            // The bar keeps its own tap handling; this recognizer only reports
+            // where the touch landed.
+            recognizer.cancelsTouchesInView = false
+            recognizer.delegate = self
+            tabBar.addGestureRecognizer(recognizer)
+            tabBarTapRecognizer = recognizer
+        }
+
+        @objc private func handleTabBarTap(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended,
+                  let tabBarController = observedController else { return }
+            let tabBar = tabBarController.tabBar
+            let point = recognizer.location(in: tabBar)
+            guard tabBar.bounds.contains(point) else { return }
+            let itemFrames = RootTabHitTester.itemFrames(
+                in: tabBar.bounds,
+                itemCount: tabBar.items?.count ?? 0
+            )
+            guard let tappedTab = RootTabHitTester.tab(at: point, itemFrames: itemFrames),
+                  tappedTab == RootTab(tabIndex: tabBarController.selectedIndex) else { return }
+            fireReselect()
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+
+        private func fireReselect() {
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - lastReselectUptime > 0.3 else { return }
+            lastReselectUptime = now
+            DispatchQueue.main.async(execute: onReselectHome)
         }
 
         func tabBarController(
@@ -491,8 +549,7 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
 
             if tabBarController.selectedViewController === viewController,
                tabBarController.viewControllers?.first === viewController {
-                let callback = onReselectHome
-                DispatchQueue.main.async(execute: callback)
+                fireReselect()
             }
             return true
         }
@@ -521,6 +578,22 @@ enum RootTabHitTester {
     static func tab(at point: CGPoint, itemFrames: [CGRect]) -> RootTab? {
         guard let index = itemFrames.firstIndex(where: { $0.contains(point) }) else { return nil }
         return RootTab(tabIndex: index)
+    }
+
+    /// `UITabBar` splits its own width evenly between its items and publishes
+    /// no API for their frames, so equal slices of the bar are the closest
+    /// available approximation of where each item sits.
+    static func itemFrames(in bounds: CGRect, itemCount: Int) -> [CGRect] {
+        guard itemCount > 0, bounds.width > 0 else { return [] }
+        let itemWidth = bounds.width / CGFloat(itemCount)
+        return (0..<itemCount).map { index in
+            CGRect(
+                x: bounds.minX + itemWidth * CGFloat(index),
+                y: bounds.minY,
+                width: itemWidth,
+                height: bounds.height
+            )
+        }
     }
 }
 
