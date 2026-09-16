@@ -326,9 +326,9 @@ private struct MainTabView: View {
                 MeView(account: account)
             }
         }
-        // The Liquid Glass bar collapses to a pill while a feed scrolls down
-        // and restores on scroll up, so it stops covering feed content.
-        .minimizingTabBarOnScrollDown()
+        // Feeds report their scroll direction to `TabBarControllerProxy`,
+        // which shrinks the bar Instagram-style (a proportional scale-down,
+        // not the system pill).
     }
 
     private var legacyTabView: some View {
@@ -475,6 +475,7 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
                 tabBarController.delegate = self
             }
             installTabBarTapRecognizer(on: tabBarController)
+            TabBarControllerProxy.shared.attach(tabBarController)
         }
 
         func detach() {
@@ -487,6 +488,7 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
             tabBarTapRecognizer = nil
             observedController = nil
             previousDelegate = nil
+            TabBarControllerProxy.shared.attach(nil)
         }
 
         /// SwiftUI installs its own tab bar controller delegate, so the hook
@@ -596,6 +598,189 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
             }
             return super.forwardingTarget(for: aSelector)
         }
+    }
+}
+
+/// The single UIKit bridge to the shared tab bar. SwiftUI pages never reach
+/// the UITabBarController directly: the thread detail asks for the bar to
+/// disappear entirely (Coolapk-style, so its action bar sits at the screen
+/// bottom), and scroll surfaces ask for the Instagram-style proportional
+/// shrink while reading down. UIKit target-action wiring keeps this
+/// main-thread-only by construction.
+final class TabBarControllerProxy {
+    static let shared = TabBarControllerProxy()
+
+    private(set) weak var controller: UITabBarController?
+    private var isMinimized = false
+
+    func attach(_ tabBarController: UITabBarController?) {
+        guard controller !== tabBarController else { return }
+        controller = tabBarController
+        isMinimized = false
+        applyMinimizedTransform(animated: false)
+    }
+
+    /// 酷安式：进入帖子后 tab bar 整条消失，评论操作栏落到屏幕底部。
+    /// `setTabBarHidden` is the system API on iOS 18+; earlier systems keep
+    /// relying on SwiftUI's `.toolbar(.hidden, for: .tabBar)`.
+    func setTabBarHidden(_ hidden: Bool, animated: Bool) {
+        guard let controller else { return }
+        if #available(iOS 18.0, *) {
+            controller.setTabBarHidden(hidden, animated: animated)
+        }
+    }
+
+    /// IG 式：内容下滚（手指上滑）时整条等比例轻微缩小并下沉，滚回来恢复。
+    func setTabBarMinimized(_ minimized: Bool) {
+        guard isMinimized != minimized else { return }
+        isMinimized = minimized
+        applyMinimizedTransform(animated: true)
+    }
+
+    private func applyMinimizedTransform(animated: Bool) {
+        guard let tabBar = controller?.tabBar, tabBar.bounds.height > 0 else { return }
+        let target: CGAffineTransform
+        if isMinimized {
+            // Scale around the bar's own center, then sink part of it below
+            // the screen edge — a proportional collapse, not the system pill.
+            let scale: CGFloat = 0.9
+            let sink = tabBar.bounds.height * 0.42
+            target = CGAffineTransform(
+                translationX: tabBar.bounds.midX * (1 - scale),
+                y: tabBar.bounds.midY * (1 - scale) + sink
+            ).scaledBy(x: scale, y: scale)
+        } else {
+            target = .identity
+        }
+        if animated {
+            UIView.animate(withDuration: 0.28, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+                tabBar.transform = target
+            }
+        } else {
+            tabBar.transform = target
+        }
+    }
+}
+
+/// Hosts inside a scroll surface and forwards the pan direction to the shared
+/// proxy. Only a target is added to the scroll view's existing pan
+/// recognizer, so no second gesture competes with the system's.
+private struct TabBarScrollDirectionReporter: UIViewRepresentable {
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> AttachmentView {
+        let view = AttachmentView()
+        view.onHierarchyChange = { [weak coordinator = context.coordinator] attachmentView in
+            coordinator?.scheduleAttachment(from: attachmentView)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: AttachmentView, context: Context) {
+        context.coordinator.scheduleAttachment(from: uiView)
+    }
+
+    static func dismantleUIView(_ uiView: AttachmentView, coordinator: Coordinator) {
+        uiView.onHierarchyChange = nil
+        coordinator.detach()
+    }
+
+    final class AttachmentView: UIView {
+        var onHierarchyChange: ((AttachmentView) -> Void)?
+        private(set) var hierarchyGeneration: UInt = 0
+
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            hierarchyGeneration &+= 1
+            onHierarchyChange?(self)
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            hierarchyGeneration &+= 1
+            onHierarchyChange?(self)
+        }
+    }
+
+    final class Coordinator: NSObject {
+        private weak var attachedScrollView: UIScrollView?
+        private weak var panRecognizer: UIPanGestureRecognizer?
+        private var pendingAttachment: DispatchWorkItem?
+        private var attachmentRequestID: UInt = 0
+        private var lastReportUptime: TimeInterval = 0
+        private static let velocityThreshold: CGFloat = 120
+        private static let minimumReportInterval: TimeInterval = 0.15
+
+        func scheduleAttachment(from view: AttachmentView) {
+            attachmentRequestID &+= 1
+            let requestID = attachmentRequestID
+            let generation = view.hierarchyGeneration
+            pendingAttachment?.cancel()
+            let workItem = DispatchWorkItem { [weak self, weak view] in
+                guard let self, let view else { return }
+                guard self.attachmentRequestID == requestID,
+                      generation == view.hierarchyGeneration else { return }
+                self.pendingAttachment = nil
+                self.attach(to: Self.enclosingScrollView(startingAt: view))
+            }
+            pendingAttachment = workItem
+            DispatchQueue.main.async(execute: workItem)
+        }
+
+        func detach() {
+            attachmentRequestID &+= 1
+            pendingAttachment?.cancel()
+            pendingAttachment = nil
+            panRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
+            panRecognizer = nil
+            attachedScrollView = nil
+        }
+
+        private func attach(to scrollView: UIScrollView?) {
+            detach()
+            guard let scrollView else { return }
+            attachedScrollView = scrollView
+            scrollView.panGestureRecognizer.addTarget(self, action: #selector(handlePan(_:)))
+            panRecognizer = scrollView.panGestureRecognizer
+        }
+
+        @objc private func handlePan(_ pan: UIPanGestureRecognizer) {
+            guard pan.state == .began || pan.state == .changed else { return }
+            let velocity = pan.velocity(in: attachedScrollView).y
+            let uptime = ProcessInfo.processInfo.systemUptime
+            guard uptime - lastReportUptime >= Self.minimumReportInterval else { return }
+            // Finger up (velocity < 0) reads further down the feed — shrink.
+            // Finger down walks back toward the top — restore.
+            if velocity < -Self.velocityThreshold {
+                TabBarControllerProxy.shared.setTabBarMinimized(true)
+                lastReportUptime = uptime
+            } else if velocity > Self.velocityThreshold {
+                TabBarControllerProxy.shared.setTabBarMinimized(false)
+                lastReportUptime = uptime
+            }
+        }
+
+        private static func enclosingScrollView(startingAt view: UIView) -> UIScrollView? {
+            var current: UIView? = view.superview
+            while let candidate = current {
+                if let scrollView = candidate as? UIScrollView {
+                    return scrollView
+                }
+                current = candidate.superview
+            }
+            return nil
+        }
+    }
+}
+
+extension View {
+    /// Place inside a scroll surface's content so its pan direction reaches
+    /// the shared tab bar proxy (Instagram-style proportional shrink while
+    /// reading down, restore on the way back).
+    func reportsScrollDirectionToTabBar() -> some View {
+        background(TabBarScrollDirectionReporter())
     }
 }
 

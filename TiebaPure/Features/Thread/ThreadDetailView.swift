@@ -7,6 +7,7 @@ struct ThreadDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.readingPreferences) private var readingPreferences
     private let localThreadLibraryStore = LocalThreadLibraryStore.shared
     @ObservedObject private var savedThreadStore = SavedThreadStore.shared
@@ -494,6 +495,11 @@ struct ThreadDetailView: View {
                 || selectedForum != nil
         ) else { return }
         isPageVisible = false
+        if horizontalSizeClass == .compact {
+            // Pages pushed on top of the thread (profile, forum) keep the bar
+            // hidden like Coolapk does; only leaving this stack restores it.
+            TabBarControllerProxy.shared.setTabBarHidden(false, animated: true)
+        }
         let readingPositionRequest = readingPersistenceRequest(allowWhileLoading: true)
         readingTrackingState.cancelPendingCommit()
         readingTrackingState.pendingAutomaticPageLoad = false
@@ -524,6 +530,12 @@ struct ThreadDetailView: View {
         navigationSourceLifecycle.didAppear()
         isPageVisible = true
         completeOwnThreadDeletionNavigationIfPossible()
+        // Coolapk-style: the thread detail owns the whole screen, so the tab
+        // bar leaves entirely and the action bar sits at the screen bottom.
+        // The split layout keeps the bar (both columns stay navigable).
+        if horizontalSizeClass == .compact {
+            TabBarControllerProxy.shared.setTabBarHidden(true, animated: true)
+        }
     }
 
     /// The scroll container stays mounted across the loading→loaded swap.
@@ -2182,6 +2194,7 @@ struct ThreadDetailView: View {
         }
 
         let targetState = post.isLiked == false
+        LikeHaptics.triggerToggled()
         updatingPostLikeIDs.insert(post.id)
         likeActionError = nil
 
