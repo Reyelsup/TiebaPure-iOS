@@ -90,6 +90,18 @@ extension View {
         }
     }
 
+    /// iOS 26 collapses the floating Liquid Glass tab bar into a small pill
+    /// while content scrolls down and restores it on scroll up, so the bar
+    /// stops covering feed content — the reading-app behavior. Earlier
+    /// systems have no minimizable bar and this is a no-op.
+    @ViewBuilder
+    func minimizingTabBarOnScrollDown() -> some View {
+        if #available(iOS 26.0, *) {
+            tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            self
+        }
+    }
 }
 
 enum PaginationPrefetchPolicy {

@@ -968,11 +968,17 @@ struct TiebaRemoteImage: View {
     var showsRetryButton = true
     var showsResolvedImage = true
     var loadsAutomatically = true
+    /// Dissolves the resolved bitmap in instead of popping it in. Forum apps
+    /// fade images in because a same-frame appearance — exactly what the
+    /// synchronous cache probe produces — reads as a hard cut; the fade turns
+    /// "the picture was suddenly there" into "the picture settled in".
+    var fadeInOnResolve = false
     var onLoadStateChange: ((TiebaRemoteImageLoadState) -> Void)?
     var onImageResolved: ((UIImage) -> Void)?
     var onImageLayoutResolved: ((UIImage, CGRect) -> Void)?
     var onDebugImageObserverResolved: ((UIView, UIImage) -> Void)?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var model = TiebaRemoteImageModel()
 
     init(
@@ -985,6 +991,7 @@ struct TiebaRemoteImage: View {
         showsRetryButton: Bool = true,
         showsResolvedImage: Bool = true,
         loadsAutomatically: Bool = true,
+        fadeInOnResolve: Bool = false,
         onLoadStateChange: ((TiebaRemoteImageLoadState) -> Void)? = nil,
         onImageResolved: ((UIImage) -> Void)? = nil,
         onImageLayoutResolved: ((UIImage, CGRect) -> Void)? = nil,
@@ -998,6 +1005,7 @@ struct TiebaRemoteImage: View {
         self.showsRetryButton = showsRetryButton
         self.showsResolvedImage = showsResolvedImage
         self.loadsAutomatically = loadsAutomatically
+        self.fadeInOnResolve = fadeInOnResolve
         self.onLoadStateChange = onLoadStateChange
         self.onImageResolved = onImageResolved
         self.onImageLayoutResolved = onImageLayoutResolved
@@ -1022,6 +1030,7 @@ struct TiebaRemoteImage: View {
                                     .aspectRatio(contentMode: contentMode)
                             }
                         }
+                            .transition(.opacity)
                             .background {
                                 if onImageLayoutResolved != nil || activeDebugImageObserver != nil {
                                     TiebaResolvedImageFrameReader(
@@ -1079,6 +1088,15 @@ struct TiebaRemoteImage: View {
                 }
             }
         }
+        // The fade lives on the phase-driven container: SwiftUI then animates
+        // the placeholder→bitmap swap as a real transition instead of snapping
+        // the resolved image in on a single frame.
+        .animation(
+            fadeInOnResolve && reduceMotion == false
+                ? .easeOut(duration: 0.22)
+                : nil,
+            value: model.loadState
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: "\(targetPixelSize)#\(urls.map(\.absoluteString).joined(separator: "|"))#\(retryTrigger)#\(loadsAutomatically)") {
             guard loadsAutomatically else {

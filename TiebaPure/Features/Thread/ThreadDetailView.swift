@@ -60,6 +60,7 @@ struct ThreadDetailView: View {
     @State private var loadTask: Task<ThreadPage, Error>?
     @State private var showsInlineRefreshAnimation = false
     @State private var inlineRefreshAnimationToken = 0
+    @State private var repliesScrollRequest = 0
     @State private var savedReadingPosition: ThreadReadingPosition?
     @State private var restoredReadingFloor: Int?
     @State private var showsRestoredReadingBanner = false
@@ -158,12 +159,26 @@ struct ThreadDetailView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if threadPage != nil,
-                   selectedSubpostPost == nil,
-                   contentSubmissionSettingsStore.repliesEnabled {
-                    ContentReplyEntryBar(
-                        title: "回复帖子",
-                        accessibilityIdentifier: "thread-compose-reply-button",
-                        action: openThreadReplyComposer
+                   selectedSubpostPost == nil {
+                    ThreadDetailActionBar(
+                        replyCount: threadPage?.thread.replyCount ?? 0,
+                        likeCount: mainPost?.likeCount ?? 0,
+                        isLiked: mainPost?.isLiked == true,
+                        isLikeUpdating: mainPost.map { updatingPostLikeIDs.contains($0.id) } ?? false,
+                        isCollected: isCollected,
+                        isCollectionUpdating: isUpdatingCollection,
+                        canReply: contentSubmissionSettingsStore.repliesEnabled,
+                        canLike: contentSubmissionSettingsStore.likesEnabled && (mainPost?.id ?? 0) > 0,
+                        onCompose: openThreadReplyComposer,
+                        onScrollToReplies: { repliesScrollRequest &+= 1 },
+                        onToggleLike: {
+                            guard let mainPost,
+                                  contentSubmissionSettingsStore.likesEnabled,
+                                  mainPost.id > 0 else { return }
+                            toggleLike(for: mainPost, objectType: .thread)
+                        },
+                        onToggleCollection: toggleCollection,
+                        shareURL: threadWebURL
                     )
                 }
             }
@@ -1294,6 +1309,18 @@ struct ThreadDetailView: View {
             }
             .onChange(of: initialDestinationScrollRequest) { _ in
                 performInitialDestinationScroll(proxy: scrollProxy)
+            }
+            .onChange(of: repliesScrollRequest) { _ in
+                // The action bar's comments button jumps straight to the
+                // replies header; unlike the initial-destination flow this can
+                // fire repeatedly and while the header is off-screen above.
+                if reduceMotion {
+                    scrollProxy.scrollTo(ThreadDetailScrollTarget.replies, anchor: .top)
+                } else {
+                    withAnimation(.easeInOut(duration: 0.24)) {
+                        scrollProxy.scrollTo(ThreadDetailScrollTarget.replies, anchor: .top)
+                    }
+                }
             }
             .onAppear {
                 requestInitialDestinationScrollIfReady()
@@ -2613,6 +2640,160 @@ private struct ForumToolbarTitle: View {
         // which is half the height on a capsule.
         .frame(minHeight: TiebaPureTheme.ToolbarGlass.controlHeight)
         .forumToolbarCapsule()
+    }
+}
+
+/// 酷安式详情底栏：左侧"写评论"胶囊，右侧评论/点赞/收藏/分享按钮组。
+/// iOS 26 上两者是浮动的 Liquid Glass 胶囊；更早的系统停靠在栏背景上。
+private struct ThreadDetailActionBar: View {
+    let replyCount: Int
+    let likeCount: Int
+    let isLiked: Bool
+    let isLikeUpdating: Bool
+    let isCollected: Bool
+    let isCollectionUpdating: Bool
+    let canReply: Bool
+    let canLike: Bool
+    let onCompose: () -> Void
+    let onScrollToReplies: () -> Void
+    let onToggleLike: (() -> Void)?
+    let onToggleCollection: () -> Void
+    let shareURL: URL
+
+    var body: some View {
+        content
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("thread-action-bar")
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if #available(iOS 26.0, *) {
+            // Floating pair of glass capsules; the scroll edge effect keeps
+            // content legible behind them.
+            HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                composeCapsule
+                actionCapsule
+            }
+            .padding(.horizontal, TiebaPureTheme.Spacing.md)
+            .padding(.top, TiebaPureTheme.Spacing.xs)
+            .padding(.bottom, TiebaPureTheme.Spacing.xs)
+        } else {
+            HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                composeCapsule
+                actionCapsule
+            }
+            .padding(.horizontal, TiebaPureTheme.Spacing.md)
+            .padding(.vertical, TiebaPureTheme.Spacing.xs)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+        }
+    }
+
+    private var composeCapsule: some View {
+        Button(action: onCompose) {
+            HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                Image(systemName: "square.and.pencil")
+                    .font(.subheadline)
+                    .accessibilityHidden(true)
+                Text("写评论")
+                    .font(.subheadline)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .forumToolbarCapsule()
+        .accessibilityLabel("写评论")
+        .accessibilityHint("打开回复编辑器")
+        .accessibilityIdentifier("thread-compose-reply-button")
+    }
+
+    private var actionCapsule: some View {
+        HStack(spacing: 0) {
+            actionButton(
+                icon: "bubble.right",
+                label: countText(replyCount),
+                action: onScrollToReplies
+            )
+            .accessibilityLabel("查看回复")
+            .accessibilityIdentifier("thread-bar-comments-button")
+
+            actionButton(
+                icon: isLiked ? "hand.thumbsup.fill" : "hand.thumbsup",
+                label: countText(likeCount),
+                tint: isLiked ? TiebaPureTheme.ColorToken.primaryAccent : nil,
+                isLoading: isLikeUpdating,
+                action: { onToggleLike?() }
+            )
+            .accessibilityLabel(isLiked ? "取消点赞" : "点赞")
+            .accessibilityIdentifier("thread-bar-like-button")
+
+            actionButton(
+                icon: isCollected ? "star.fill" : "star",
+                label: isCollected ? "已收藏" : "收藏",
+                tint: isCollected ? .yellow : nil,
+                isLoading: isCollectionUpdating,
+                action: onToggleCollection
+            )
+            .accessibilityLabel(isCollected ? "取消收藏帖子" : "收藏帖子")
+            .accessibilityIdentifier("thread-bar-collect-button")
+
+            shareButton
+        }
+        .forumToolbarCapsule()
+    }
+
+    private var shareButton: some View {
+        ShareLink(item: shareURL) {
+            actionLabel(icon: "square.and.arrow.up", text: "分享")
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("分享帖子")
+        .accessibilityIdentifier("thread-bar-share-button")
+    }
+
+    private func actionButton(
+        icon: String,
+        label: String,
+        tint: Color? = nil,
+        isLoading: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            actionLabel(icon: icon, text: label, tint: tint)
+                .opacity(isLoading ? 0.4 : 1)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func actionLabel(icon: String, text: String, tint: Color? = nil) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+            Text(text)
+                .font(.caption2)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(tint ?? Color.primary)
+    }
+
+    private func countText(_ count: Int) -> String {
+        guard count > 0 else { return "0" }
+        if count >= 10_000 {
+            let units = Double(count) / 10_000
+            return units >= 10 ? "\(Int(units))w+" : String(format: "%.1fw+", units)
+        }
+        return "\(count)"
     }
 }
 

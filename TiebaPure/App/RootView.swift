@@ -326,6 +326,9 @@ private struct MainTabView: View {
                 MeView(account: account)
             }
         }
+        // The Liquid Glass bar collapses to a pill while a feed scrolls down
+        // and restores on scroll up, so it stops covering feed content.
+        .minimizingTabBarOnScrollDown()
     }
 
     private var legacyTabView: some View {

@@ -428,6 +428,7 @@ private struct MediaThumbnailView: View {
                         showsRetryButton: false,
                         showsResolvedImage: previewSource == nil,
                         loadsAutomatically: isManualLoadAuthorized,
+                        fadeInOnResolve: true,
                         onLoadStateChange: { state in
                             if internalLoadState != state {
                                 internalLoadState = state

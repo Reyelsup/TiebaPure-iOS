@@ -574,7 +574,7 @@ final class ImagePreviewSourceAnchor: ObservableObject {
             self.image = image
         }
         if view?.image !== image {
-            view?.image = image
+            view?.setResolvingImage(image)
         }
     }
 
@@ -808,6 +808,29 @@ final class ImagePreviewSourceView: UIImageView {
         guard let onTransitionTap else { return false }
         onTransitionTap()
         return true
+    }
+
+    /// Dissolves a newly resolved bitmap in instead of popping it in. The
+    /// inline detail image draws through this view exclusively, so without the
+    /// fade a cache hit appears in a single frame and reads as a hard cut.
+    /// Replacing an already-visible bitmap (retry, preview handoff) keeps the
+    /// current alpha so live content never blinks.
+    func setResolvingImage(_ newImage: UIImage?) {
+        guard image !== newImage else { return }
+        image = newImage
+        guard newImage != nil else { return }
+        if UIAccessibility.isReduceMotionEnabled || alpha != 1 {
+            alpha = 1
+            return
+        }
+        alpha = 0
+        UIView.animate(
+            withDuration: 0.22,
+            delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.alpha = 1
+        }
     }
 
     override var intrinsicContentSize: CGSize {
