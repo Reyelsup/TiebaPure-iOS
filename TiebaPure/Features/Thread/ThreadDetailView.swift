@@ -179,7 +179,7 @@ struct ThreadDetailView: View {
                     .zIndex(3)
                 }
             }
-            .navigationTitle(threadNavigationTitle)
+            .navigationTitle(Self.navigationTitleText)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { navigationToolbar }
     }
@@ -351,10 +351,11 @@ struct ThreadDetailView: View {
             .onDisappear(perform: handleDisappear)
     }
 
-    private var threadNavigationTitle: String {
-        guard let title = threadPage?.thread.title, title.isEmpty == false else { return "帖子" }
-        return title
-    }
+    /// The principal toolbar item replaces the title text in this bar, so the
+    /// string is never drawn here — it only serves as the back label of views
+    /// pushed on top. Keeping it constant stops the navigation bar from being
+    /// invalidated (and its Liquid Glass redrawn) the moment the page lands.
+    private static let navigationTitleText = "帖子"
 
     @ViewBuilder
     private func subpostSheetContent(post: Post) -> some View {
@@ -510,39 +511,48 @@ struct ThreadDetailView: View {
         completeOwnThreadDeletionNavigationIfPossible()
     }
 
-    @ViewBuilder
+    /// The scroll container stays mounted across the loading→loaded swap.
+    /// Swapping a bare state view for a fresh `ScrollView` remounts the
+    /// `.softScrollEdgeEffect()` onto a new scroll view exactly when the page
+    /// lands, which makes the navigation bar redraw its Liquid Glass in the
+    /// same frame the main post's images resolve — the flash this replaces.
     private var primaryContent: some View {
+        GeometryReader { proxy in
+            refreshablePostScrollView {
+                primaryStateContent(viewportHeight: proxy.size.height)
+            }
+        }
+        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+    }
+
+    @ViewBuilder
+    private func primaryStateContent(viewportHeight: CGFloat) -> some View {
+        // One extra point keeps every state genuinely scrollable so the
+        // short-distance pull refresh still emits overscroll geometry.
+        let stateHeight = max(viewportHeight, 1) + 1
         if isLoading && didLoad == false {
             ReaderStateView.loading(
                 isResumingReadingPosition ? "正在恢复上次阅读位置" : "正在加载帖子"
             )
+            .frame(minHeight: stateHeight)
         } else if isMainPostBlocked {
-            ReaderStateScrollView(refresh: { await reload() }) {
-                ReaderStateView.empty(
-                    title: "帖子已被本机屏蔽",
-                    message: "主楼命中了当前的用户或关键词屏蔽规则。"
-                )
-            }
+            ReaderStateView.empty(
+                title: "帖子已被本机屏蔽",
+                message: "主楼命中了当前的用户或关键词屏蔽规则。"
+            )
+            .frame(minHeight: stateHeight)
         } else if let errorMessage, posts.isEmpty, mainPost == nil {
-            ReaderStateScrollView(refresh: { await reload() }) {
-                ReaderStateView.error(message: errorMessage, action: requestReload)
-            }
+            ReaderStateView.error(message: errorMessage, action: requestReload)
+                .frame(minHeight: stateHeight)
         } else if posts.isEmpty, mainPost == nil {
-            ReaderStateScrollView(refresh: { await reload() }) {
-                ReaderStateView.empty(
-                    title: "暂无内容",
-                    message: "下拉即可刷新帖子。",
-                    actionTitle: hasMore && didLoad ? "继续加载" : nil,
-                    action: hasMore && didLoad ? requestLoadMore : nil
-                )
-            }
+            ReaderStateView.empty(
+                title: "暂无内容",
+                message: "下拉即可刷新帖子。",
+                actionTitle: hasMore && didLoad ? "继续加载" : nil,
+                action: hasMore && didLoad ? requestLoadMore : nil
+            )
+            .frame(minHeight: stateHeight)
         } else {
-            loadedPostContent
-        }
-    }
-
-    private var loadedPostContent: some View {
-        refreshablePostScrollView {
             LazyVStack(spacing: 0) {
                 mainPostContent
                 replySection
@@ -552,7 +562,6 @@ struct ThreadDetailView: View {
             }
             .readableWidth()
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
     }
 
     @ViewBuilder
@@ -747,24 +756,28 @@ struct ThreadDetailView: View {
         }
     }
 
-    @ViewBuilder
+    private var toolbarForum: Forum? {
+        threadPage?.forum ?? forumFallback
+    }
+
     private var forumToolbarTitle: some View {
-        // The fallback keeps the chip's identity on screen from the first
-        // frame. Without it the title starts as a bare 帖子 label and swaps to
-        // the forum chip once the page lands, which reads as a flash.
-        if let forum = threadPage?.forum ?? forumFallback {
-            Button {
+        // One stable structure from the first frame. Swapping between a bare
+        // label and a Button when the page lands changes the toolbar item's
+        // identity, so the system tears the principal slot down and re-adds
+        // it — the glass pill redraws exactly then. The fallback keeps the
+        // chip's content on screen early where the caller knows the forum;
+        // elsewhere the chip holds its placeholder text until the page does.
+        Button {
+            if let forum = toolbarForum {
                 openForum(forum)
-            } label: {
-                // The chip owns its full bar-control height now, so the old
-                // 44pt minimum only added an invisible frame on top of it.
-                ForumToolbarTitle(forum: forum)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-        } else {
-            ForumToolbarTitle(forum: nil)
+        } label: {
+            // The chip owns its full bar-control height now, so the old
+            // 44pt minimum only added an invisible frame on top of it.
+            ForumToolbarTitle(forum: toolbarForum)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     private var favoriteToolbarButton: some View {
@@ -1269,7 +1282,15 @@ struct ThreadDetailView: View {
             )
             .onChange(of: scrollRequest) { request in
                 guard let request else { return }
-                performScrollRequest(request, proxy: scrollProxy)
+                // The scroll container is mounted from the first frame now, so
+                // the restore request set while the loading state was on
+                // screen arrives through onChange instead of the onAppear
+                // replay below. It still needs the precise-correction path.
+                if request.isInitialRestore {
+                    performInitialScrollRequest(request, proxy: scrollProxy)
+                } else {
+                    performScrollRequest(request, proxy: scrollProxy)
+                }
             }
             .onChange(of: initialDestinationScrollRequest) { _ in
                 performInitialDestinationScroll(proxy: scrollProxy)
@@ -1519,9 +1540,13 @@ struct ThreadDetailView: View {
         requestScroll(to: mainPost.id)
     }
 
-    private func requestScroll(to postID: UInt64) {
+    private func requestScroll(to postID: UInt64, isInitialRestore: Bool = false) {
         guard postID > 0 else { return }
-        scrollRequest = ThreadPostScrollRequest(id: UUID(), postID: postID)
+        scrollRequest = ThreadPostScrollRequest(
+            id: UUID(),
+            postID: postID,
+            isInitialRestore: isInitialRestore
+        )
     }
 
     private func requestInitialDestinationScrollIfReady() {
@@ -2040,7 +2065,7 @@ struct ThreadDetailView: View {
                     )
                     var didResolveRequestedPost = true
                     if loadedPostIDs.contains(requestedPostID) {
-                        requestScroll(to: requestedPostID)
+                        requestScroll(to: requestedPostID, isInitialRestore: true)
                         if isResumingReadingPosition {
                             showRestoredReadingBanner()
                         }
@@ -2410,6 +2435,11 @@ enum ThreadReadingViewportPolicy {
 private struct ThreadPostScrollRequest: Equatable {
     var id: UUID
     var postID: UInt64
+    /// Restore/jump-to-post requests issued while the loading state is still
+    /// on screen. They land on rows whose heights the lazy container has only
+    /// estimated, so they must take the precise-correction path instead of a
+    /// plain animated scrollTo.
+    var isInitialRestore = false
 }
 
 private enum ThreadDetailScrollTarget: Hashable {

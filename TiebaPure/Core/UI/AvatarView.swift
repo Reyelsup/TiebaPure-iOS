@@ -153,6 +153,48 @@ private enum TiebaImagePipelineError: Error {
     case noSource
 }
 
+/// Tracks which decode buckets are currently resident in the shared memory
+/// cache for each URL. NSCache cannot be probed for keys it does not hold, so
+/// this side index enables two things: a synchronous "already decoded?" check
+/// from the main actor, and reuse of a larger cached decode for a smaller
+/// request — the feed strip crops every image into a short cell while the
+/// thread detail decodes the same URL into a taller bucket, and without reuse
+/// (or a prefetch) that mismatch re-downloads and re-decodes the picture
+/// exactly when the detail navigation bar settles.
+final class TiebaDecodedImageIndex: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bucketsByURL: [String: Set<Int>] = [:]
+
+    func record(url: String, bucket: Int) {
+        lock.withLock { bucketsByURL[url, default: []].insert(bucket) }
+    }
+
+    func remove(url: String, bucket: Int) {
+        lock.withLock {
+            guard var buckets = bucketsByURL[url] else { return }
+            buckets.remove(bucket)
+            if buckets.isEmpty {
+                bucketsByURL[url] = nil
+            } else {
+                bucketsByURL[url] = buckets
+            }
+        }
+    }
+
+    func clear() {
+        lock.withLock { bucketsByURL.removeAll() }
+    }
+
+    /// The smallest cached bucket that can serve `requested` without
+    /// upscaling. A larger decode displays fine in a smaller frame.
+    func reuseBucket(for url: String, requested: Int) -> Int? {
+        lock.withLock {
+            guard let buckets = bucketsByURL[url] else { return nil }
+            return buckets.filter { $0 >= requested }.min()
+        }
+    }
+}
+
 actor TiebaImagePipeline {
     static let shared = TiebaImagePipeline()
     static let maximumImageBytes = 30 * 1_024 * 1_024
@@ -187,7 +229,11 @@ actor TiebaImagePipeline {
         }
     }
 
-    private let memoryCache = NSCache<NSString, UIImage>()
+    // NSCache is documented thread-safe, and the bucket index owns its own
+    // lock, so both stay reachable from a synchronous (main-actor) probe
+    // without crossing into the actor's executor.
+    nonisolated(unsafe) private let memoryCache = NSCache<NSString, UIImage>()
+    private let decodedIndex = TiebaDecodedImageIndex()
     private let urlCache: URLCache
     private let session: URLSession
     private let redirectScope: SecureRemoteRedirectScope
@@ -218,6 +264,15 @@ actor TiebaImagePipeline {
         )
         memoryCache.totalCostLimit = 96 * 1_024 * 1_024
         memoryCache.countLimit = 300
+        let index = decodedIndex
+        memoryCache.didEvict = { key, _ in
+            // Keys are "bucket|url"; drop the dead entry from the side index
+            // so a reuse probe never points at an evicted bitmap.
+            let raw = key as String
+            guard let separator = raw.firstIndex(of: "|"),
+                  let bucket = Int(raw[..<separator]) else { return }
+            index.remove(url: String(raw[raw.index(after: separator)...]), bucket: bucket)
+        }
     }
 
     func clearCaches() {
@@ -231,12 +286,79 @@ actor TiebaImagePipeline {
         }
         memoryCache.removeAllObjects()
         urlCache.removeAllCachedResponses()
+        decodedIndex.clear()
     }
 
     /// Memory pressure should release decoded bitmaps without discarding the
     /// disk cache or cancelling requests that are still serving visible rows.
     func releaseDecodedImageCache() {
         memoryCache.removeAllObjects()
+        decodedIndex.clear()
+    }
+
+    /// Synchronous memory-cache probe usable from the main actor. Returns a
+    /// decode that can serve `targetPixelSize` without upscaling, so a view
+    /// whose image is already cached resolves in the same frame instead of
+    /// flashing the loading placeholder first.
+    nonisolated func cachedImage(for urls: [URL], targetPixelSize: Int) -> UIImage? {
+        let bucket = TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize)
+        for url in urls {
+            let absolute = url.absoluteString
+            if let exact = memoryCache.object(forKey: "\(bucket)|\(absolute)" as NSString) {
+                return exact
+            }
+            if let reuse = decodedIndex.reuseBucket(for: absolute, requested: bucket),
+               let image = memoryCache.object(forKey: "\(reuse)|\(absolute)" as NSString) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    /// Warms the caches for `urls` without a view attached: the raw response
+    /// lands in the URL cache and the decode in the memory cache, so a later
+    /// request for the same URL and bucket resolves instantly. Requests
+    /// already in flight are joined rather than duplicated.
+    func prefetch(urls: [URL], targetPixelSize: Int) {
+        let bucket = TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize)
+        for url in urls {
+            guard TiebaImageSourcePolicy.isSyntheticFailureURL(url) == false else { continue }
+            let safeURL: URL
+            if SavedThreadMediaAuthorization.shared.allows(url) {
+                safeURL = url
+            } else if let validated = TiebaURL.image(url.absoluteString),
+                      redirectScope.allows(validated) || Self.isSyntheticFixtureURL(validated) {
+                safeURL = validated
+            } else {
+                continue
+            }
+            let request = DecodeRequest(url: safeURL, targetPixelSize: bucket)
+            if decodedMemoryImage(for: request) != nil || inFlight[request] != nil {
+                continue
+            }
+            // Fire-and-forget: the shared operation decodes into the memory
+            // cache via completeSharedRequest; the discarded result here is
+            // the point.
+            Task {
+                _ = try? await self.waitForSharedImage(request)
+            }
+        }
+    }
+
+    private func decodedMemoryImage(for request: DecodeRequest) -> UIImage? {
+        if let exact = memoryCache.object(forKey: request.cacheKey) {
+            return exact
+        }
+        let absolute = request.url.absoluteString
+        guard let reuse = decodedIndex.reuseBucket(for: absolute, requested: request.targetPixelSize) else {
+            return nil
+        }
+        return memoryCache.object(forKey: "\(reuse)|\(absolute)" as NSString)
+    }
+
+    private func storeDecodedImage(_ image: UIImage, for request: DecodeRequest) {
+        memoryCache.setObject(image, forKey: request.cacheKey, cost: Self.decodedImageCost(image))
+        decodedIndex.record(url: request.url.absoluteString, bucket: request.targetPixelSize)
     }
 
     /// `targetPixelSize` caps the decoded bitmap's longest edge. Distinct
@@ -292,7 +414,7 @@ actor TiebaImagePipeline {
             url: safeURL,
             targetPixelSize: TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize)
         )
-        if let cached = memoryCache.object(forKey: request.cacheKey) {
+        if let cached = decodedMemoryImage(for: request) {
             await onProgress?(BoundedURLSessionProgress(receivedBytes: 1, expectedBytes: 1))
             return cached
         }
@@ -320,8 +442,7 @@ actor TiebaImagePipeline {
                 ))
             }
             let image = Self.syntheticFixtureImage(for: url)
-            let cost = Self.decodedImageCost(image)
-            memoryCache.setObject(image, forKey: request.cacheKey, cost: cost)
+            storeDecodedImage(image, for: request)
             return image
         }
 #endif
@@ -332,8 +453,7 @@ actor TiebaImagePipeline {
                 onProgress: onProgress
             )
             try Task.checkCancellation()
-            let cost = Self.decodedImageCost(image)
-            memoryCache.setObject(image, forKey: request.cacheKey, cost: cost)
+            storeDecodedImage(image, for: request)
             return image
         }
         return try await waitForSharedImage(request)
@@ -436,8 +556,7 @@ actor TiebaImagePipeline {
 
         switch result {
         case let .success(image):
-            let cost = Self.decodedImageCost(image)
-            memoryCache.setObject(image, forKey: request.cacheKey, cost: cost)
+            storeDecodedImage(image, for: request)
             requestState.waiters.values.forEach { $0.resume(returning: image) }
         case let .failure(error):
             requestState.waiters.values.forEach { $0.resume(throwing: error) }
@@ -717,6 +836,20 @@ private final class TiebaRemoteImageModel: ObservableObject {
 
         guard urls.isEmpty == false else {
             phase = .failure
+            return
+        }
+
+        // A decode already in the shared memory cache resolves in this frame.
+        // Going through .loading first made cached images blink their gray
+        // placeholder for a beat — visible whenever the feed's thumbnail is
+        // reused by the thread detail, or after a prefetch has warmed the
+        // cache.
+        if force == false,
+           let cached = TiebaImagePipeline.shared.cachedImage(
+               for: urls,
+               targetPixelSize: targetPixelSize
+           ) {
+            phase = .success(cached)
             return
         }
 

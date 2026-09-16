@@ -1078,6 +1078,7 @@ enum ForumSearchLaunchPolicy {
 
 struct ForumThreadRow: View {
     @Environment(\.isReaderSplitListColumn) private var isReaderSplitListColumn
+    @Environment(\.readingPreferences) private var readingPreferences
 
     enum Presentation {
         case list
@@ -1224,6 +1225,14 @@ struct ForumThreadRow: View {
                 )
                     .padding(.top, TiebaPureTheme.Spacing.xxs)
             }
+        }
+        .onAppear {
+            ThreadMediaPrefetcher.prefetch(
+                thread: thread,
+                allowsAutomaticLoading: ReaderMediaRequestPolicy.resolve(
+                    readingPreferences.mediaLoading
+                ).loadsAutomatically
+            )
         }
     }
 
@@ -1671,5 +1680,80 @@ private struct AuthorHeader: View {
     private var metadataSystemImage: String {
         category?.metadata(for: thread).systemImage
             ?? "bubble.left.and.text.bubble.right"
+    }
+}
+
+/// Warms the image pipeline with the decode sizes the thread detail will
+/// request for a feed row's images. The feed strip crops every image into a
+/// short cell, so its decode bucket differs from the detail's inline layout;
+/// without this, opening a post re-downloads and re-decodes the main images
+/// exactly when the navigation bar settles, which reads as a second loading
+/// pass. The detail-side synchronous cache probe then resolves the prefetched
+/// bitmaps in the first frame instead of flashing placeholders.
+enum ThreadMediaPrefetcher {
+    private static let maximumImageCount = 3
+    private static let debounceNanoseconds: UInt64 = 350_000_000
+
+    @MainActor
+    static func prefetch(thread: ThreadSummary, allowsAutomaticLoading: Bool) {
+        guard allowsAutomaticLoading else { return }
+        let entries = detailDecodeEntries(for: thread)
+        guard entries.isEmpty == false else { return }
+        Task {
+            // Let the row's own thumbnail requests win the race first: their
+            // raw responses land in the URL cache, so the detail-size decode
+            // then only pays for decoding, not for a duplicate download.
+            try? await Task.sleep(nanoseconds: debounceNanoseconds)
+            for entry in entries {
+                await TiebaImagePipeline.shared.prefetch(
+                    urls: [entry.url],
+                    targetPixelSize: entry.targetPixelSize
+                )
+            }
+        }
+    }
+
+    private struct DetailDecodeEntry {
+        let url: URL
+        let targetPixelSize: Int
+    }
+
+    @MainActor
+    private static func detailDecodeEntries(for thread: ThreadSummary) -> [DetailDecodeEntry] {
+        let containerWidth = detailContainerWidth()
+        let displayScale = UITraitCollection.current.displayScale
+        var entries: [DetailDecodeEntry] = []
+        for block in thread.blocks {
+            guard entries.count < maximumImageCount else { break }
+            guard case let .image(image) = block,
+                  let url = image.thumbnailURL ?? image.originalURL,
+                  TiebaImageSourcePolicy.urls(primary: url).isEmpty == false else {
+                continue
+            }
+            // Mirror InlineImageLayoutPolicy so the prefetched bucket is the
+            // one ImageViewer will actually request for this image.
+            let displayHeight = InlineImageLayoutPolicy.height(
+                containerWidth: containerWidth,
+                image: image
+            )
+            entries.append(DetailDecodeEntry(
+                url: url,
+                targetPixelSize: TiebaImageDecodePolicy.previewTargetPixelSize(
+                    for: CGSize(width: containerWidth, height: displayHeight),
+                    displayScale: displayScale
+                )
+            ))
+        }
+        return entries
+    }
+
+    @MainActor
+    private static func detailContainerWidth() -> CGFloat {
+        let screen = UIScreen.main.bounds.width
+        let horizontalPadding = TiebaPureTheme.Spacing.md * 2
+        return min(
+            max(screen - horizontalPadding, 1),
+            TiebaPureTheme.ReadableWidth.maxTablet
+        )
     }
 }
