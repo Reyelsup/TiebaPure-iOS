@@ -185,12 +185,15 @@ final class TiebaDecodedImageIndex: @unchecked Sendable {
         lock.withLock { bucketsByURL.removeAll() }
     }
 
-    /// The smallest cached bucket that can serve `requested` without
-    /// upscaling. A larger decode displays fine in a smaller frame.
-    func reuseBucket(for url: String, requested: Int) -> Int? {
+    /// Cached buckets that can serve `requested` without upscaling, smallest
+    /// first. A larger decode displays fine in a smaller frame. The index
+    /// cannot observe NSCache's own evictions, so every candidate must be
+    /// verified against the cache; stale hits are dropped with `remove` and
+    /// the next candidate tried.
+    func reuseCandidates(for url: String, requested: Int) -> [Int] {
         lock.withLock {
-            guard let buckets = bucketsByURL[url] else { return nil }
-            return buckets.filter { $0 >= requested }.min()
+            guard let buckets = bucketsByURL[url] else { return [] }
+            return buckets.filter { $0 >= requested }.sorted()
         }
     }
 }
@@ -264,15 +267,6 @@ actor TiebaImagePipeline {
         )
         memoryCache.totalCostLimit = 96 * 1_024 * 1_024
         memoryCache.countLimit = 300
-        let index = decodedIndex
-        memoryCache.didEvict = { key, _ in
-            // Keys are "bucket|url"; drop the dead entry from the side index
-            // so a reuse probe never points at an evicted bitmap.
-            let raw = key as String
-            guard let separator = raw.firstIndex(of: "|"),
-                  let bucket = Int(raw[..<separator]) else { return }
-            index.remove(url: String(raw[raw.index(after: separator)...]), bucket: bucket)
-        }
     }
 
     func clearCaches() {
@@ -307,9 +301,12 @@ actor TiebaImagePipeline {
             if let exact = memoryCache.object(forKey: "\(bucket)|\(absolute)" as NSString) {
                 return exact
             }
-            if let reuse = decodedIndex.reuseBucket(for: absolute, requested: bucket),
-               let image = memoryCache.object(forKey: "\(reuse)|\(absolute)" as NSString) {
-                return image
+            for reuse in decodedIndex.reuseCandidates(for: absolute, requested: bucket) {
+                let key = "\(reuse)|\(absolute)" as NSString
+                if let image = memoryCache.object(forKey: key) {
+                    return image
+                }
+                decodedIndex.remove(url: absolute, bucket: reuse)
             }
         }
         return nil
@@ -350,10 +347,14 @@ actor TiebaImagePipeline {
             return exact
         }
         let absolute = request.url.absoluteString
-        guard let reuse = decodedIndex.reuseBucket(for: absolute, requested: request.targetPixelSize) else {
-            return nil
+        for reuse in decodedIndex.reuseCandidates(for: absolute, requested: request.targetPixelSize) {
+            let key = "\(reuse)|\(absolute)" as NSString
+            if let image = memoryCache.object(forKey: key) {
+                return image
+            }
+            decodedIndex.remove(url: absolute, bucket: reuse)
         }
-        return memoryCache.object(forKey: "\(reuse)|\(absolute)" as NSString)
+        return nil
     }
 
     private func storeDecodedImage(_ image: UIImage, for request: DecodeRequest) {
