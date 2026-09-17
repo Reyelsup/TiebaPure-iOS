@@ -611,13 +611,13 @@ final class TabBarControllerProxy {
     static let shared = TabBarControllerProxy()
 
     private(set) weak var controller: UITabBarController?
-    private var isMinimized = false
+    private var shrinkProgress: CGFloat = 0
 
     func attach(_ tabBarController: UITabBarController?) {
         guard controller !== tabBarController else { return }
         controller = tabBarController
-        isMinimized = false
-        applyMinimizedTransform(animated: false)
+        shrinkProgress = 0
+        applyShrinkTransform()
     }
 
     /// 酷安式：进入帖子后 tab bar 整条消失，评论操作栏落到屏幕底部。
@@ -630,33 +630,31 @@ final class TabBarControllerProxy {
         }
     }
 
-    /// IG 式：内容下滚（手指上滑）时整条等比例轻微缩小并下沉，滚回来恢复。
-    func setTabBarMinimized(_ minimized: Bool) {
-        guard isMinimized != minimized else { return }
-        isMinimized = minimized
-        applyMinimizedTransform(animated: true)
+    /// IG 式连续跟随：progress 0 = 完整，1 = 最小。由手指位移连续驱动，
+    /// 没有阈值和状态开关，往哪个方向滑都不会抽搐。
+    func applyShrinkDelta(_ delta: CGFloat) {
+        let clamped = min(max(shrinkProgress + delta, 0), 1)
+        guard clamped != shrinkProgress else { return }
+        shrinkProgress = clamped
+        applyShrinkTransform()
     }
 
-    private func applyMinimizedTransform(animated: Bool) {
+    private func applyShrinkTransform() {
         guard let tabBar = controller?.tabBar, tabBar.bounds.height > 0 else { return }
-        let target: CGAffineTransform
-        if isMinimized {
-            // Scale around the bar's own center, then sink part of it below
-            // the screen edge — a proportional collapse, not the system pill.
-            let scale: CGFloat = 0.9
-            let sink = tabBar.bounds.height * 0.42
-            target = CGAffineTransform(
-                translationX: tabBar.bounds.midX * (1 - scale),
-                y: tabBar.bounds.midY * (1 - scale) + sink
-            ).scaledBy(x: scale, y: scale)
-        } else {
-            target = .identity
-        }
-        if animated {
-            UIView.animate(withDuration: 0.28, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-                tabBar.transform = target
+        guard shrinkProgress > 0 else {
+            if tabBar.transform != .identity {
+                tabBar.transform = .identity
             }
-        } else {
+            return
+        }
+        // Scale proportionally around the bar's own center — Instagram's
+        // collapse keeps the full icon row, just smaller and centered.
+        let scale = 1 - 0.2 * shrinkProgress
+        let target = CGAffineTransform(
+            translationX: tabBar.bounds.midX * (1 - scale),
+            y: tabBar.bounds.midY * (1 - scale)
+        ).scaledBy(x: scale, y: scale)
+        if tabBar.transform != target {
             tabBar.transform = target
         }
     }
@@ -709,9 +707,8 @@ private struct TabBarScrollDirectionReporter: UIViewRepresentable {
         private weak var panRecognizer: UIPanGestureRecognizer?
         private var pendingAttachment: DispatchWorkItem?
         private var attachmentRequestID: UInt = 0
-        private var lastReportUptime: TimeInterval = 0
-        private static let velocityThreshold: CGFloat = 120
-        private static let minimumReportInterval: TimeInterval = 0.15
+        // Finger travel that maps to the bar's full shrink range.
+        private static let travelPerFullShrink: CGFloat = 110
 
         func scheduleAttachment(from view: AttachmentView) {
             attachmentRequestID &+= 1
@@ -747,19 +744,17 @@ private struct TabBarScrollDirectionReporter: UIViewRepresentable {
         }
 
         @objc private func handlePan(_ pan: UIPanGestureRecognizer) {
-            guard pan.state == .began || pan.state == .changed else { return }
-            let velocity = pan.velocity(in: attachedScrollView).y
-            let uptime = ProcessInfo.processInfo.systemUptime
-            guard uptime - lastReportUptime >= Self.minimumReportInterval else { return }
-            // Finger up (velocity < 0) reads further down the feed — shrink.
-            // Finger down walks back toward the top — restore.
-            if velocity < -Self.velocityThreshold {
-                TabBarControllerProxy.shared.setTabBarMinimized(true)
-                lastReportUptime = uptime
-            } else if velocity > Self.velocityThreshold {
-                TabBarControllerProxy.shared.setTabBarMinimized(false)
-                lastReportUptime = uptime
-            }
+            guard pan.state == .changed, let scrollView = attachedScrollView else { return }
+            // Continuous, position-driven: each finger delta nudges the bar
+            // toward (or back from) its shrunken state. No thresholds, no
+            // state flips, so direction changes and finger slowdowns stay
+            // perfectly smooth — the way Instagram's bar tracks the finger.
+            let translation = pan.translation(in: scrollView).y
+            pan.setTranslation(.zero, in: scrollView)
+            guard translation != 0 else { return }
+            TabBarControllerProxy.shared.applyShrinkDelta(
+                -translation / Self.travelPerFullShrink
+            )
         }
 
         private static func enclosingScrollView(startingAt view: UIView) -> UIScrollView? {

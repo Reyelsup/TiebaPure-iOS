@@ -2687,6 +2687,7 @@ private struct ThreadDetailActionBar: View {
             HStack(spacing: TiebaPureTheme.Spacing.sm) {
                 composeCapsule
                 actionCapsule
+                    .layoutPriority(1)
             }
             .padding(.horizontal, TiebaPureTheme.Spacing.md)
             .padding(.top, TiebaPureTheme.Spacing.xs)
@@ -2695,6 +2696,7 @@ private struct ThreadDetailActionBar: View {
             HStack(spacing: TiebaPureTheme.Spacing.sm) {
                 composeCapsule
                 actionCapsule
+                    .layoutPriority(1)
             }
             .padding(.horizontal, TiebaPureTheme.Spacing.md)
             .padding(.vertical, TiebaPureTheme.Spacing.xs)
@@ -2707,14 +2709,14 @@ private struct ThreadDetailActionBar: View {
         Button(action: onCompose) {
             HStack(spacing: TiebaPureTheme.Spacing.xs) {
                 Image(systemName: "square.and.pencil")
-                    .font(.subheadline)
+                    .font(.body)
                     .accessibilityHidden(true)
                 Text("写评论")
                     .font(.subheadline)
                     .lineLimit(1)
             }
             .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, minHeight: 40)
+            .frame(maxWidth: .infinity, minHeight: Self.capsuleHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -2763,7 +2765,7 @@ private struct ThreadDetailActionBar: View {
         ShareLink(item: shareURL) {
             actionLabel(icon: "square.and.arrow.up", text: "分享")
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: 44)
+                .frame(minHeight: Self.capsuleHeight)
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("分享帖子")
@@ -2781,16 +2783,16 @@ private struct ThreadDetailActionBar: View {
             actionLabel(icon: icon, text: label, tint: tint)
                 .opacity(isLoading ? 0.4 : 1)
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: 44)
+                .frame(minHeight: Self.capsuleHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
     private func actionLabel(icon: String, text: String, tint: Color? = nil) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 1) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: 17, weight: .medium))
             Text(text)
                 .font(.caption2)
                 .monospacedDigit()
@@ -2799,6 +2801,10 @@ private struct ThreadDetailActionBar: View {
         }
         .foregroundStyle(tint ?? Color.primary)
     }
+
+    /// Coolapk's bar runs tall, fully-rounded capsules; 52pt matches its
+    /// proportions on an iPhone without crowding the home indicator.
+    private static let capsuleHeight: CGFloat = 52
 
     private func countText(_ count: Int) -> String {
         guard count > 0 else { return "0" }
