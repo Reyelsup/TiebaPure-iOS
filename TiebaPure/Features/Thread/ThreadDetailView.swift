@@ -2765,7 +2765,8 @@ private struct ThreadDetailActionBar: View {
     private var shareButton: some View {
         ShareLink(item: shareURL) {
             actionLabel(icon: "square.and.arrow.up", text: "分享")
-                .frame(width: Self.actionSlotWidth, minHeight: Self.capsuleHeight)
+                .frame(width: Self.actionSlotWidth)
+                .frame(minHeight: Self.capsuleHeight)
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("分享帖子")
@@ -2782,7 +2783,8 @@ private struct ThreadDetailActionBar: View {
         Button(action: action) {
             actionLabel(icon: icon, text: label, tint: tint)
                 .opacity(isLoading ? 0.4 : 1)
-                .frame(width: Self.actionSlotWidth, minHeight: Self.capsuleHeight)
+                .frame(width: Self.actionSlotWidth)
+                .frame(minHeight: Self.capsuleHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
