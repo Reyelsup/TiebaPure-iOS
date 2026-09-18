@@ -2687,7 +2687,6 @@ private struct ThreadDetailActionBar: View {
             HStack(spacing: TiebaPureTheme.Spacing.sm) {
                 composeCapsule
                 actionCapsule
-                    .layoutPriority(1)
             }
             .padding(.horizontal, TiebaPureTheme.Spacing.md)
             .padding(.top, TiebaPureTheme.Spacing.xs)
@@ -2696,7 +2695,6 @@ private struct ThreadDetailActionBar: View {
             HStack(spacing: TiebaPureTheme.Spacing.sm) {
                 composeCapsule
                 actionCapsule
-                    .layoutPriority(1)
             }
             .padding(.horizontal, TiebaPureTheme.Spacing.md)
             .padding(.vertical, TiebaPureTheme.Spacing.xs)
@@ -2716,6 +2714,9 @@ private struct ThreadDetailActionBar: View {
                     .lineLimit(1)
             }
             .foregroundStyle(.secondary)
+            // Takes whatever room the fixed-width action group leaves, so
+            // the pair splits the row the way Coolapk's does (compose wider
+            // on its own, actions fixed at four slots).
             .frame(maxWidth: .infinity, minHeight: Self.capsuleHeight)
             .contentShape(Rectangle())
         }
@@ -2764,8 +2765,7 @@ private struct ThreadDetailActionBar: View {
     private var shareButton: some View {
         ShareLink(item: shareURL) {
             actionLabel(icon: "square.and.arrow.up", text: "分享")
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: Self.capsuleHeight)
+                .frame(width: Self.actionSlotWidth, minHeight: Self.capsuleHeight)
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("分享帖子")
@@ -2782,8 +2782,7 @@ private struct ThreadDetailActionBar: View {
         Button(action: action) {
             actionLabel(icon: icon, text: label, tint: tint)
                 .opacity(isLoading ? 0.4 : 1)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: Self.capsuleHeight)
+                .frame(width: Self.actionSlotWidth, minHeight: Self.capsuleHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -2805,6 +2804,9 @@ private struct ThreadDetailActionBar: View {
     /// Coolapk's bar runs tall, fully-rounded capsules; 52pt matches its
     /// proportions on an iPhone without crowding the home indicator.
     private static let capsuleHeight: CGFloat = 52
+    /// Four fixed 48pt slots keep the action capsule's width stable while the
+    /// compose capsule absorbs the rest of the row.
+    private static let actionSlotWidth: CGFloat = 48
 
     private func countText(_ count: Int) -> String {
         guard count > 0 else { return "0" }

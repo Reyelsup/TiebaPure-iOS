@@ -424,9 +424,6 @@ struct ForumThreadsView: View {
                     alignment: .top
                 )
                 .contentShape(Rectangle())
-                // Feeds the pan direction to the shared tab bar proxy so the
-                // bar shrinks Instagram-style while scrolling down.
-                .reportsScrollDirectionToTabBar()
             }
             .accessibilityIdentifier("forum-threads-scroll-view")
             .shortPullRefresh(

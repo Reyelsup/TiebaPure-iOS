@@ -326,9 +326,6 @@ private struct MainTabView: View {
                 MeView(account: account)
             }
         }
-        // Feeds report their scroll direction to `TabBarControllerProxy`,
-        // which shrinks the bar Instagram-style (a proportional scale-down,
-        // not the system pill).
     }
 
     private var legacyTabView: some View {
@@ -604,20 +601,16 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
 /// The single UIKit bridge to the shared tab bar. SwiftUI pages never reach
 /// the UITabBarController directly: the thread detail asks for the bar to
 /// disappear entirely (Coolapk-style, so its action bar sits at the screen
-/// bottom), and scroll surfaces ask for the Instagram-style proportional
-/// shrink while reading down. UIKit target-action wiring keeps this
-/// main-thread-only by construction.
+/// bottom). UIKit target-action wiring keeps this main-thread-only by
+/// construction.
 final class TabBarControllerProxy {
     static let shared = TabBarControllerProxy()
 
     private(set) weak var controller: UITabBarController?
-    private var shrinkProgress: CGFloat = 0
 
     func attach(_ tabBarController: UITabBarController?) {
         guard controller !== tabBarController else { return }
         controller = tabBarController
-        shrinkProgress = 0
-        applyShrinkTransform()
     }
 
     /// 酷安式：进入帖子后 tab bar 整条消失，评论操作栏落到屏幕底部。
@@ -628,154 +621,6 @@ final class TabBarControllerProxy {
         if #available(iOS 18.0, *) {
             controller.setTabBarHidden(hidden, animated: animated)
         }
-    }
-
-    /// IG 式连续跟随：progress 0 = 完整，1 = 最小。由手指位移连续驱动，
-    /// 没有阈值和状态开关，往哪个方向滑都不会抽搐。
-    func applyShrinkDelta(_ delta: CGFloat) {
-        let clamped = min(max(shrinkProgress + delta, 0), 1)
-        guard clamped != shrinkProgress else { return }
-        shrinkProgress = clamped
-        applyShrinkTransform()
-    }
-
-    private func applyShrinkTransform() {
-        guard let tabBar = controller?.tabBar, tabBar.bounds.height > 0 else { return }
-        guard shrinkProgress > 0 else {
-            if tabBar.transform != .identity {
-                tabBar.transform = .identity
-            }
-            return
-        }
-        // Scale proportionally around the bar's own center — Instagram's
-        // collapse keeps the full icon row, just smaller and centered.
-        let scale = 1 - 0.2 * shrinkProgress
-        let target = CGAffineTransform(
-            translationX: tabBar.bounds.midX * (1 - scale),
-            y: tabBar.bounds.midY * (1 - scale)
-        ).scaledBy(x: scale, y: scale)
-        if tabBar.transform != target {
-            tabBar.transform = target
-        }
-    }
-}
-
-/// Hosts inside a scroll surface and forwards the pan direction to the shared
-/// proxy. Only a target is added to the scroll view's existing pan
-/// recognizer, so no second gesture competes with the system's.
-private struct TabBarScrollDirectionReporter: UIViewRepresentable {
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeUIView(context: Context) -> AttachmentView {
-        let view = AttachmentView()
-        view.onHierarchyChange = { [weak coordinator = context.coordinator] attachmentView in
-            coordinator?.scheduleAttachment(from: attachmentView)
-        }
-        return view
-    }
-
-    func updateUIView(_ uiView: AttachmentView, context: Context) {
-        context.coordinator.scheduleAttachment(from: uiView)
-    }
-
-    static func dismantleUIView(_ uiView: AttachmentView, coordinator: Coordinator) {
-        uiView.onHierarchyChange = nil
-        coordinator.detach()
-    }
-
-    final class AttachmentView: UIView {
-        var onHierarchyChange: ((AttachmentView) -> Void)?
-        private(set) var hierarchyGeneration: UInt = 0
-
-        override func didMoveToSuperview() {
-            super.didMoveToSuperview()
-            hierarchyGeneration &+= 1
-            onHierarchyChange?(self)
-        }
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            hierarchyGeneration &+= 1
-            onHierarchyChange?(self)
-        }
-    }
-
-    final class Coordinator: NSObject {
-        private weak var attachedScrollView: UIScrollView?
-        private weak var panRecognizer: UIPanGestureRecognizer?
-        private var pendingAttachment: DispatchWorkItem?
-        private var attachmentRequestID: UInt = 0
-        // Finger travel that maps to the bar's full shrink range.
-        private static let travelPerFullShrink: CGFloat = 110
-
-        func scheduleAttachment(from view: AttachmentView) {
-            attachmentRequestID &+= 1
-            let requestID = attachmentRequestID
-            let generation = view.hierarchyGeneration
-            pendingAttachment?.cancel()
-            let workItem = DispatchWorkItem { [weak self, weak view] in
-                guard let self, let view else { return }
-                guard self.attachmentRequestID == requestID,
-                      generation == view.hierarchyGeneration else { return }
-                self.pendingAttachment = nil
-                self.attach(to: Self.enclosingScrollView(startingAt: view))
-            }
-            pendingAttachment = workItem
-            DispatchQueue.main.async(execute: workItem)
-        }
-
-        func detach() {
-            attachmentRequestID &+= 1
-            pendingAttachment?.cancel()
-            pendingAttachment = nil
-            panRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
-            panRecognizer = nil
-            attachedScrollView = nil
-        }
-
-        private func attach(to scrollView: UIScrollView?) {
-            detach()
-            guard let scrollView else { return }
-            attachedScrollView = scrollView
-            scrollView.panGestureRecognizer.addTarget(self, action: #selector(handlePan(_:)))
-            panRecognizer = scrollView.panGestureRecognizer
-        }
-
-        @objc private func handlePan(_ pan: UIPanGestureRecognizer) {
-            guard pan.state == .changed, let scrollView = attachedScrollView else { return }
-            // Continuous, position-driven: each finger delta nudges the bar
-            // toward (or back from) its shrunken state. No thresholds, no
-            // state flips, so direction changes and finger slowdowns stay
-            // perfectly smooth — the way Instagram's bar tracks the finger.
-            let translation = pan.translation(in: scrollView).y
-            pan.setTranslation(.zero, in: scrollView)
-            guard translation != 0 else { return }
-            TabBarControllerProxy.shared.applyShrinkDelta(
-                -translation / Self.travelPerFullShrink
-            )
-        }
-
-        private static func enclosingScrollView(startingAt view: UIView) -> UIScrollView? {
-            var current: UIView? = view.superview
-            while let candidate = current {
-                if let scrollView = candidate as? UIScrollView {
-                    return scrollView
-                }
-                current = candidate.superview
-            }
-            return nil
-        }
-    }
-}
-
-extension View {
-    /// Place inside a scroll surface's content so its pan direction reaches
-    /// the shared tab bar proxy (Instagram-style proportional shrink while
-    /// reading down, restore on the way back).
-    func reportsScrollDirectionToTabBar() -> some View {
-        background(TabBarScrollDirectionReporter())
     }
 }
 

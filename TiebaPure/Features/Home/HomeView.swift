@@ -545,9 +545,6 @@ struct HomeView: View {
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
-            // Inside the scroll content so the reporter finds the hosting
-            // scroll view and drives the Instagram-style bar shrink.
-            .reportsScrollDirectionToTabBar()
         }
         .scrollBounceBehavior(.always, axes: .vertical)
         .accessibilityIdentifier("home-feed-scroll-view")
