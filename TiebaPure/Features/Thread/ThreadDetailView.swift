@@ -62,7 +62,6 @@ struct ThreadDetailView: View {
     @State private var showsInlineRefreshAnimation = false
     @State private var inlineRefreshAnimationToken = 0
     @State private var repliesScrollRequest = 0
-    @State private var showsBackToTop = false
     @State private var savedReadingPosition: ThreadReadingPosition?
     @State private var restoredReadingFloor: Int?
     @State private var showsRestoredReadingBanner = false
@@ -194,30 +193,6 @@ struct ThreadDetailView: View {
                     .padding(.top, TiebaPureTheme.Spacing.xs)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(3)
-                }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                // Long-thread affordance: appears once reading has moved away
-                // from the top, sits above the action bar at the trailing
-                // edge. Scroll requests route through `requestScroll` because
-                // the scroll proxy lives inside the scroll container.
-                if showsBackToTop, let mainPost {
-                    Button {
-                        requestScroll(to: mainPost.id)
-                    } label: {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .forumToolbarCapsule()
-                    .padding(.trailing, TiebaPureTheme.Spacing.md)
-                    .padding(.bottom, TiebaPureTheme.Spacing.sm)
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                    .accessibilityLabel("回顶部")
-                    .accessibilityIdentifier("thread-back-to-top-button")
                 }
             }
             .navigationTitle(Self.navigationTitleText)
@@ -1888,12 +1863,6 @@ struct ThreadDetailView: View {
 
     private func handleReadingScrollRegionChange(_ region: ThreadReadingScrollRegion) {
         readingTrackingState.scrollRegion = region
-        let shouldShowBackToTop = region == .away && didLoad
-        if showsBackToTop != shouldShowBackToTop {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                showsBackToTop = shouldShowBackToTop
-            }
-        }
         if region == .away {
             readingTrackingState.didMoveAwayFromTop = true
             return
@@ -2714,15 +2683,16 @@ private struct ThreadDetailActionBar: View {
     private var content: some View {
         if #available(iOS 26.0, *) {
             // Floating pair of glass capsules; the scroll edge effect keeps
-            // content legible behind them. Hugs the home indicator closely,
-            // the way Coolapk's bar sits at the very bottom.
+            // content legible behind them. Generous side insets keep the pair
+            // from running edge to edge — Coolapk's bar floats well inside
+            // the screen instead of filling the row.
             HStack(spacing: TiebaPureTheme.Spacing.sm) {
                 composeCapsule
                 actionCapsule
             }
-            .padding(.horizontal, TiebaPureTheme.Spacing.md)
+            .padding(.horizontal, TiebaPureTheme.Spacing.lg)
             .padding(.top, TiebaPureTheme.Spacing.xs)
-            .padding(.bottom, 3)
+            .padding(.bottom, 2)
         } else {
             HStack(spacing: TiebaPureTheme.Spacing.sm) {
                 composeCapsule
@@ -2838,9 +2808,9 @@ private struct ThreadDetailActionBar: View {
     /// Coolapk's bar proportions: tall fully-rounded capsules that still
     /// clear the home indicator comfortably.
     private static let capsuleHeight: CGFloat = 48
-    /// Four fixed 48pt slots keep the action capsule's width stable while the
-    /// compose capsule absorbs the rest of the row.
-    private static let actionSlotWidth: CGFloat = 48
+    /// Four compact 45pt slots keep the action capsule's width stable while
+    /// the compose capsule absorbs the rest of the row.
+    private static let actionSlotWidth: CGFloat = 45
 
     private func countText(_ count: Int) -> String {
         guard count > 0 else { return "0" }
